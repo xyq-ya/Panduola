@@ -4,9 +4,13 @@ import 'calendar_page.dart';
 import 'log_page.dart';
 import 'data_page.dart';
 import 'profile_page.dart';
+import 'package:provider/provider.dart';
+import '../providers/user_provider.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final int id;
+
+  const HomePage({super.key, required this.id});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -35,7 +39,6 @@ class _HomePageState extends State<HomePage> {
       resizeToAvoidBottomInset: false,
       body: Column(
         children: [
-          // 移除 _buildHeader()，不再显示部门选择器
           Expanded(child: _pages[_selectedIndex]),
           Container(
             height: 80,

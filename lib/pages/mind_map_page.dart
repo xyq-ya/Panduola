@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/user_provider.dart';
 
 class MindMapPage extends StatefulWidget {
   const MindMapPage({super.key});
@@ -10,6 +12,15 @@ class MindMapPage extends StatefulWidget {
 class _MindMapPageState extends State<MindMapPage> {
   bool _showDropdown = false;
   String _headerTab = 'department'; // department / team / employee
+  int? _userId; // 新增用户 id
+
+  @override
+  void initState() {
+    super.initState();
+    // 页面初始化时获取 Provider 中的 id
+    _userId = Provider.of<UserProvider>(context, listen: false).id;
+    print('MindMapPage 获取的用户 id: $_userId');
+  }
 
   Widget _buildDepartmentHeader() {
     return Container(

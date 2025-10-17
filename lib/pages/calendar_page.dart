@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/user_provider.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -8,6 +10,15 @@ class CalendarPage extends StatefulWidget {
 }
 
 class _CalendarPageState extends State<CalendarPage> {
+  int? _userId;  // 页面私有变量，保存用户 id
+
+  @override
+  void initState() {
+    super.initState();
+    // 页面初始化时获取一次 Provider 中的 id
+    _userId = Provider.of<UserProvider>(context, listen: false).id;
+    print('页面获取的用户 id：$_userId');
+  }
   DateTime _selectedDate = DateTime(2025, 10, 1);
 
   // 示例任务（固定时间示例）

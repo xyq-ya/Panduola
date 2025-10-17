@@ -1,8 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/user_provider.dart';
 
-/// 日志页面
-class LogPage extends StatelessWidget {
+/// 日志页面（Full，StatefulWidget）
+class LogPage extends StatefulWidget {
   const LogPage({super.key});
+
+  @override
+  State<LogPage> createState() => _LogPageState();
+}
+
+class _LogPageState extends State<LogPage> {
+  int? _userId; // 页面私有变量，保存用户 id
+
+  @override
+  void initState() {
+    super.initState();
+    // 页面初始化时获取一次 Provider 中的 id
+    _userId = Provider.of<UserProvider>(context, listen: false).id;
+    print('页面获取的用户 id：$_userId');
+  }
 
   // 通用的颜色变暗函数
   Color _darken(Color color, [double amount = .2]) {
@@ -111,19 +128,20 @@ class LogPage extends StatelessWidget {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          int currentUserId = 1;
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => AddTaskPage(
-                creatorId: currentUserId,
-                parentId: null,
-              ),
-            ),
-          );
-        },
-        backgroundColor: Colors.purpleAccent,
+        onPressed: _userId == null
+            ? null
+            : () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AddTaskPage(
+                      creatorId: _userId!,
+                      parentId: null,
+                    ),
+                  ),
+                );
+              },
+        backgroundColor: _userId == null ? Colors.grey : Colors.purpleAccent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
@@ -133,7 +151,7 @@ class LogPage extends StatelessWidget {
   }
 }
 
-/// 创建任务页面（卡通风格）
+/// 创建任务页面（Full，StatefulWidget）
 class AddTaskPage extends StatefulWidget {
   final int creatorId;
   final int? parentId;
@@ -147,16 +165,15 @@ class AddTaskPage extends StatefulWidget {
 class _AddTaskPageState extends State<AddTaskPage> {
   final _formKey = GlobalKey<FormState>();
 
+  late int _creatorId;
+  int? _parentId;
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _assignedIdController = TextEditingController();
   DateTime _startTime = DateTime.now();
   DateTime _endTime = DateTime.now().add(const Duration(days: 1));
   String _assignedType = 'personal';
   String _status = '待执行';
   int _progress = 0;
-  late int _creatorId;
-  int? _parentId;
 
   @override
   void initState() {
@@ -169,7 +186,6 @@ class _AddTaskPageState extends State<AddTaskPage> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _assignedIdController.dispose();
     super.dispose();
   }
 
@@ -206,12 +222,11 @@ class _AddTaskPageState extends State<AddTaskPage> {
 
   void _submitForm() {
     if (_formKey.currentState!.validate()) {
+      print("creator_id: $_creatorId");
       print("parent_id: $_parentId");
       print("title: ${_titleController.text}");
       print("description: ${_descriptionController.text}");
-      print("creator_id: $_creatorId");
       print("assigned_type: $_assignedType");
-      print("assigned_id: ${_assignedIdController.text}");
       print("start_time: $_startTime");
       print("end_time: $_endTime");
       print("status: $_status");
@@ -313,18 +328,6 @@ class _AddTaskPageState extends State<AddTaskPage> {
                     labelText: '分发等级',
                     border: InputBorder.none,
                   ),
-                ),
-              ),
-              _buildCard(
-                child: TextFormField(
-                  controller: _assignedIdController,
-                  decoration: const InputDecoration(
-                    labelText: '分发对象ID',
-                    border: InputBorder.none,
-                  ),
-                  keyboardType: TextInputType.number,
-                  validator: (value) =>
-                      value == null || value.isEmpty ? '请输入分发对象ID' : null,
                 ),
               ),
               _buildCard(
