@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
-import 'pages/home_page.dart';
+import 'package:provider/provider.dart';
+import 'pages/login_page.dart';
+import 'providers/user_provider.dart';
 
 void main() {
-  runApp(const PandoraApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => UserProvider(),
+      child: const PandoraApp(),
+    ),
+  );
 }
 
 class PandoraApp extends StatelessWidget {
@@ -19,7 +26,7 @@ class PandoraApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF0F2F5),
         fontFamily: 'Nunito',
       ),
-      home: const HomePage(),
+      home: const LoginPage(),
     );
   }
 }
