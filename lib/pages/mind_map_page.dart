@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class MindMapPage extends StatefulWidget {
   const MindMapPage({super.key});
@@ -10,77 +12,153 @@ class MindMapPage extends StatefulWidget {
 }
 
 class _MindMapPageState extends State<MindMapPage> {
-  bool _showDropdown = false;
-  String _headerTab = 'department'; // department / team / employee
-  int? _userId; // 新增用户 id
+  int? _userId;
+  int? _roleId;
+  String? selectedDepartment;
+  String? selectedTeam;
+  String? selectedEmployee;
+
+  List<String> departments = [];
+  List<String> teams = [];
+  List<String> employees = [];
+
+  bool loading = true;
 
   @override
   void initState() {
     super.initState();
-    // 页面初始化时获取 Provider 中的 id
-    _userId = Provider.of<UserProvider>(context, listen: false).id;
-    print('MindMapPage 获取的用户 id: $_userId');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      _userId = userProvider.id;
+      _initUserInfo();
+    });
   }
 
-  Widget _buildDepartmentHeader() {
-    return Container(
-      height: 56,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFA5D8FF), Color(0xFF87CEEB)], 
-          begin: Alignment.topLeft, 
-          end: Alignment.bottomRight
+  Future<void> _initUserInfo() async {
+    if (_userId == null) return;
+
+    try {
+      final res = await http.post(
+        Uri.parse('http://10.0.2.2:5000/api/user_info'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId}),
+      );
+
+      if (res.statusCode != 200) throw Exception('API请求失败: ${res.statusCode}');
+
+      final data = jsonDecode(res.body)['data'];
+      setState(() {
+        _roleId = data['role_id'];
+        selectedDepartment = data['department'];
+        selectedTeam = data['team'];
+        selectedEmployee = data['username'];
+      });
+
+      await _loadDropdowns();
+    } catch (e) {
+      print('初始化用户信息错误: $e');
+      setState(() {
+        loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadDropdowns() async {
+    if (_roleId == null) return;
+
+    List<String> newDepartments = [];
+    List<String> newTeams = [];
+    List<String> newEmployees = [];
+
+    try {
+      // 部门
+      if (_roleId! <= 2) {
+        final res = await http.post(
+          Uri.parse('http://10.0.2.2:5000/api/select_department'),
+          headers: {'Content-Type': 'application/json'},
+        );
+        final deptData = jsonDecode(res.body)['data'] as List;
+        newDepartments = deptData.map((e) => e['dept_name'] as String).toList();
+      } else if (_roleId! >= 3 && selectedDepartment != null) {
+        newDepartments = [selectedDepartment!];
+      }
+
+      // 团队
+      if (_roleId! <= 2 || _roleId! == 3) {
+        if (selectedDepartment != null) {
+          final res = await http.post(
+            Uri.parse('http://10.0.2.2:5000/api/select_team'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'department': selectedDepartment}),
+          );
+          final teamData = jsonDecode(res.body)['data'] as List;
+          newTeams = teamData.map((e) => e['team_name'] as String).toList();
+        }
+      } else if (_roleId! >= 4 && selectedTeam != null) {
+        newTeams = [selectedTeam!];
+      }
+
+      // 员工
+      if (_roleId! <= 4 && selectedTeam != null) {
+        final res = await http.post(
+          Uri.parse('http://10.0.2.2:5000/api/select_user'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'team': selectedTeam}),
+        );
+        final userData = jsonDecode(res.body)['data'] as List;
+        newEmployees = userData.map((e) => e['username'] as String).toList();
+      } else if (_roleId! == 5) {
+        newEmployees = [selectedEmployee ?? ''];
+      }
+    } catch (e) {
+      print('加载下拉列表错误: $e');
+    }
+
+    setState(() {
+      departments = newDepartments;
+      teams = newTeams;
+      employees = newEmployees;
+      loading = false;
+    });
+  }
+
+  // 权限判断
+  bool get canSelectDepartment => _roleId != null && _roleId! <= 2;
+  bool get canSelectTeam => _roleId != null && (_roleId! <= 3 || _roleId! == 4);
+  bool get canSelectEmployee => _roleId != null && _roleId! <= 4;
+
+  Widget _buildDropdown({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+    required bool enabled,
+  }) {
+    return DropdownButtonFormField<String>(
+      isExpanded: true, // 防止 overflow
+      value: value,
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFFC4DDFF)),
         ),
-        border: Border(bottom: BorderSide(color: Color(0xFFD1E8FF), width: 2)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
-      child: Stack(
-        children: [
-          Center(
-            child: GestureDetector(
-              onTap: () => setState(() => _showDropdown = !_showDropdown),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.blue.withOpacity(0.12), 
-                      blurRadius: 6, 
-                      offset: const Offset(0, 4)
-                    )
-                  ],
-                  border: Border.all(color: const Color(0xFFC4DDFF)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _headerTab == 'department' 
-                      ? const Text('部门', style: TextStyle(fontWeight: FontWeight.bold)) 
-                      : _headerTab == 'team' 
-                        ? const Text('团队', style: TextStyle(fontWeight: FontWeight.bold)) 
-                        : const Text('员工', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.arrow_drop_down, size: 20, color: Colors.black54)
-                  ],
-                ),
-              ),
-            ),
-          ),
-          if (_showDropdown)
-            Positioned(
-              top: 60,
-              left: MediaQuery.of(context).size.width / 2 - 100,
-              child: _DropdownBubble(
-                selected: _headerTab,
-                onSelect: (v) => setState(() {
-                  _headerTab = v;
-                  _showDropdown = false;
-                }),
-              ),
-            ),
-        ],
-      ),
+      icon: const Icon(Icons.arrow_drop_down, color: Colors.black54),
+      style: const TextStyle(color: Colors.black87, fontSize: 14),
+      items: items.isNotEmpty
+          ? items
+              .map((e) => DropdownMenuItem(
+                    value: e,
+                    child: Text(
+                      e,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ))
+              .toList()
+          : [],
+      onChanged: enabled && items.isNotEmpty ? onChanged : null,
     );
   }
 
@@ -100,160 +178,184 @@ class _MindMapPageState extends State<MindMapPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (loading) return const Center(child: CircularProgressIndicator());
+
     return Column(
       children: [
-        _buildDepartmentHeader(), // 添加部门选择器
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final screenWidth = constraints.maxWidth;
-              final screenHeight = constraints.maxHeight;
-              final cardWidth = (screenWidth - 36) / 2;
-              final cardHeight = (screenHeight - 36) / 2;
-              
-              return SingleChildScrollView(
-                child: Container(
-                  height: screenHeight, // 设置固定高度确保均匀分布
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      // 第一行：两个卡片
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: _card(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 8),
-                                    const Text(
-                                      '公司十大事项', 
-                                      style: TextStyle(
-                                        fontSize: 16, 
-                                        fontWeight: FontWeight.bold, 
-                                        color: Color(0xFF1E3A8A)
-                                      )
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Expanded(
-                                      child: Column(
-                                        children: [
-                                          _priorityRow('Q4产品发布计划', Colors.redAccent, Colors.red.shade50),
-                                          const SizedBox(height: 8),
-                                          _priorityRow('年度预算审批', Colors.orange, Colors.yellow.shade50),
-                                          const SizedBox(height: 8),
-                                          _priorityRow('员工满意度调研', Colors.green, Colors.green.shade50),
-                                        ],
-                                      ),
-                                    )
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _card(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      '公司10大派发任务', 
-                                      style: TextStyle(
-                                        fontSize: 16, 
-                                        fontWeight: FontWeight.bold, 
-                                        color: Color(0xFFEC6A1E)
-                                      )
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Expanded(
-                                      child: Column(
-                                        children: [
-                                          _taskRow('完成原型设计', '进行中', Colors.orange.shade100, Colors.orange),
-                                          const SizedBox(height: 8),
-                                          _taskRow('整理用户反馈', '已完成', Colors.green.shade100, Colors.green),
-                                          const SizedBox(height: 8),
-                                          _taskRow('测试报告编写', '进行中', Colors.orange.shade100, Colors.orange),
-                                        ],
-                                      ),
-                                    )
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // 第二行：两个卡片
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: _card(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: const [
-                                    Text(
-                                      '个人10大重要展示项', 
-                                      style: TextStyle(
-                                        fontSize: 16, 
-                                        fontWeight: FontWeight.bold, 
-                                        color: Color(0xFF6D28D9)
-                                      )
-                                    ),
-                                    SizedBox(height: 8),
-                                    Expanded(
-                                      child: Column(
-                                        children: [
-                                          _SimpleRow(icon: Icons.circle_outlined, color: Colors.blue, title: '团队会议准备', time: '14:00'),
-                                          SizedBox(height: 8),
-                                          _SimpleRow(icon: Icons.circle_outlined, color: Colors.pink, title: '项目文档整理', time: '15:30'),
-                                          SizedBox(height: 8),
-                                          _SimpleRow(icon: Icons.check_circle, color: Colors.green, title: '周报提交（已完成）', time: ''),
-                                        ],
-                                      ),
-                                    )
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _card(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      '个人日志', 
-                                      style: TextStyle(
-                                        fontSize: 16, 
-                                        fontWeight: FontWeight.bold, 
-                                        color: Color(0xFFEC4899)
-                                      )
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Expanded(
-                                      child: Column(
-                                        children: [
-                                          _logItem('张三', '已完成需求分析文档初稿', '08:45'),
-                                          const SizedBox(height: 8),
-                                          _logItem('李四', '测试环境部署完成，进入联调', '09:30'),
-                                        ],
-                                      ),
-                                    )
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+        // 顶部下拉框
+        Container(
+          height: 80,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFFA5D8FF), Color(0xFF87CEEB)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border(bottom: BorderSide(color: Color(0xFFD1E8FF), width: 2)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildDropdown(
+                  label: '部门',
+                  value: selectedDepartment,
+                  items: departments,
+                  onChanged: (v) => setState(() {
+                    selectedDepartment = v;
+                    selectedTeam = null;
+                    selectedEmployee = null;
+                    _loadDropdowns();
+                  }),
+                  enabled: canSelectDepartment,
                 ),
-              );
-            }
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildDropdown(
+                  label: '团队',
+                  value: selectedTeam,
+                  items: teams,
+                  onChanged: (v) => setState(() {
+                    selectedTeam = v;
+                    selectedEmployee = null;
+                    _loadDropdowns();
+                  }),
+                  enabled: canSelectTeam,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildDropdown(
+                  label: '员工',
+                  value: selectedEmployee,
+                  items: employees,
+                  onChanged: (v) => setState(() => selectedEmployee = v),
+                  enabled: canSelectEmployee,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 页面卡片布局：四等分
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final cardWidth = (constraints.maxWidth - 12) / 2;
+                final cardHeight = (constraints.maxHeight - 12) / 2;
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: cardWidth,
+                          height: cardHeight,
+                          child: _card(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '公司十大事项',
+                                  style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1E3A8A)),
+                                ),
+                                const SizedBox(height: 8),
+                                _priorityRow('Q4产品发布计划', Colors.redAccent, Colors.red.shade50),
+                                const SizedBox(height: 8),
+                                _priorityRow('年度预算审批', Colors.orange, Colors.yellow.shade50),
+                                const SizedBox(height: 8),
+                                _priorityRow('员工满意度调研', Colors.green, Colors.green.shade50),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: cardWidth,
+                          height: cardHeight,
+                          child: _card(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '公司十大派发任务',
+                                  style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFEC6A1E)),
+                                ),
+                                const SizedBox(height: 8),
+                                _taskRow('完成原型设计', '进行中', Colors.orange.shade100, Colors.orange),
+                                const SizedBox(height: 8),
+                                _taskRow('整理用户反馈', '已完成', Colors.green.shade100, Colors.green),
+                                const SizedBox(height: 8),
+                                _taskRow('测试报告编写', '进行中', Colors.orange.shade100, Colors.orange),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: cardWidth,
+                          height: cardHeight,
+                          child: _card(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text(
+                                  '个人十大展示项',
+                                  style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF6D28D9)),
+                                ),
+                                SizedBox(height: 8),
+                                _SimpleRow(icon: Icons.circle_outlined, color: Colors.blue, title: '团队会议准备', time: '14:00'),
+                                SizedBox(height: 8),
+                                _SimpleRow(icon: Icons.circle_outlined, color: Colors.pink, title: '项目文档整理', time: '15:30'),
+                                SizedBox(height: 8),
+                                _SimpleRow(icon: Icons.check_circle, color: Colors.green, title: '周报提交（已完成）', time: ''),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: cardWidth,
+                          height: cardHeight,
+                          child: _card(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '个人日志',
+                                  style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFEC4899)),
+                                ),
+                                const SizedBox(height: 8),
+                                _logItem('张三', '已完成需求分析文档初稿', '08:45'),
+                                const SizedBox(height: 8),
+                                _logItem('李四', '测试环境部署完成，进入联调', '09:30'),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -267,9 +369,9 @@ class _MindMapPageState extends State<MindMapPage> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10), 
-              color: bg, 
-              border: Border.all(color: bg)
+              borderRadius: BorderRadius.circular(10),
+              color: bg,
+              border: Border.all(color: bg),
             ),
             child: Text(title, style: const TextStyle(fontSize: 13)),
           ),
@@ -320,76 +422,17 @@ class _MindMapPageState extends State<MindMapPage> {
         Expanded(
           child: Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade50, 
-              borderRadius: BorderRadius.circular(12)
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, 
-              children: [
-                Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(content, style: const TextStyle(fontSize: 12)),
-                const SizedBox(height: 6),
-                Text(time, style: TextStyle(fontSize: 10, color: Colors.grey.shade400)),
-              ]
-            ),
+            decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(12)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(content, style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 6),
+              Text(time, style: TextStyle(fontSize: 10, color: Colors.grey.shade400)),
+            ]),
           ),
         ),
       ],
-    );
-  }
-}
-
-class _DropdownBubble extends StatelessWidget {
-  final Function(String) onSelect;
-  final String selected;
-  const _DropdownBubble({required this.onSelect, required this.selected, super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      elevation: 10,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        width: 200,
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFE9ECEF)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _bubbleItem('技术研发中心', 'department'),
-            const SizedBox(height: 6),
-            _bubbleItem('产品设计中心', 'department', highlight: true),
-            const SizedBox(height: 6),
-            _bubbleItem('市场营销部', 'department'),
-            const SizedBox(height: 6),
-            _bubbleItem('UI设计组', 'team'),
-            const SizedBox(height: 6),
-            _bubbleItem('张三', 'employee'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _bubbleItem(String text, String tag, {bool highlight = false}) {
-    return GestureDetector(
-      onTap: () => onSelect(tag),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
-        decoration: highlight 
-          ? BoxDecoration(
-              color: const Color(0xFFEBF6FF), 
-              borderRadius: BorderRadius.circular(6)
-            ) 
-          : null,
-        child: Text(text, style: const TextStyle(fontSize: 14)),
-      ),
     );
   }
 }
@@ -403,11 +446,13 @@ class _SimpleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(children: [
-      Icon(icon, color: color),
-      const SizedBox(width: 8),
-      Expanded(child: Text(title)),
-      if (time.isNotEmpty) Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-    ]);
+    return Row(
+      children: [
+        Icon(icon, color: color),
+        const SizedBox(width: 8),
+        Expanded(child: Text(title)),
+        if (time.isNotEmpty) Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+      ],
+    );
   }
 }

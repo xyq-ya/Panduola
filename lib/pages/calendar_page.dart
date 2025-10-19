@@ -441,14 +441,6 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
           ),
         ],
       ),
-      // 可扩展：浮动按钮用于新增任务
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // TODO: 添加新任务逻辑
-        },
-        backgroundColor: Colors.deepPurple,
-        child: const Icon(Icons.add),
-      ),
     );
   }
 }
