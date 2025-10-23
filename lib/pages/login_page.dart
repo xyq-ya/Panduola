@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'home_page.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../utils/api.dart';
 import '../providers/user_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -32,7 +33,7 @@ class _LoginPageState extends State<LoginPage> {
 
   try {
     // 使用 Android 模拟器访问本地 Flask 服务
-    final url = Uri.parse('http://10.0.2.2:5000/api/login');
+  final url = Uri.parse('${Api.baseUrl()}/api/login');
 
     final response = await http.post(
       url,
