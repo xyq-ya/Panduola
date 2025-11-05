@@ -172,60 +172,6 @@ def user_info():
         print("user_info 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
 
-        # -------------------- 获取用户日程数据 --------------------
-        @bp.route('/get_user_schedule', methods=['POST'])
-        def get_user_schedule():
-            data = request.get_json() or {}
-            user_id = data.get('user_id')
-
-            if not user_id:
-                return jsonify({"code": 1, "msg": "缺少用户ID"})
-
-            try:
-                conn = current_app.db_conn
-                cursor = conn.cursor()
-
-                # 根据用户权限获取不同的数据
-                cursor.execute("""
-                    SELECT
-                        t.id, t.task_name, t.start_date, t.end_date, t.progress,
-                        t.priority, t.status, t.color, t.is_milestone,
-                        u.name as assignee_name
-                    FROM task_schedule t
-                    LEFT JOIN sys_user u ON t.assignee_id = u.id
-                    WHERE t.assignee_id = %s OR t.created_by = %s
-                    ORDER BY t.start_date
-                """, (user_id, user_id))
-
-                tasks = cursor.fetchall()
-                cursor.close()
-
-                task_list = []
-                for task in tasks:
-                    task_list.append({
-                        "id": task[0],
-                        "name": task[1],
-                        "start_date": task[2].strftime('%Y-%m-%d') if task[2] else None,
-                        "end_date": task[3].strftime('%Y-%m-%d') if task[3] else None,
-                        "progress": float(task[4]) if task[4] else 0.0,
-                        "priority": task[5],
-                        "status": task[6],
-                        "color": task[7],
-                        "is_milestone": bool(task[8]),
-                        "assignee_name": task[9]
-                    })
-
-                return jsonify({
-                    "code": 0,
-                    "data": task_list,
-                    "count": len(task_list)
-                })
-
-            except Exception as e:
-                print("获取日程数据异常:", e)
-                return jsonify({"code": 500, "msg": "服务器内部错误"})
-
-# 在 routes.py 中添加
 # -------------------- 获取用户任务数据（用于甘特图） --------------------
 @bp.route('/get_user_tasks', methods=['POST'])
 def get_user_tasks():
@@ -239,7 +185,30 @@ def get_user_tasks():
         conn = current_app.db_conn
         cursor = conn.cursor()
 
-        # 获取用户的任务数据（包括分配给用户的任务和用户创建的任务）
+        # 1. 获取用户所在的团队ID
+        cursor.execute("SELECT team_id FROM sys_user WHERE id=%s", (user_id,))
+        user_info = cursor.fetchone()
+
+        if not user_info:
+            cursor.close()
+            return jsonify({"code": 2, "msg": "用户信息不存在"})
+
+        user_team_id = user_info[0]
+
+        print(f"🔍 调试信息: user_id={user_id}, user_team_id={user_team_id}")
+        print(f"🔍 查询条件: assigned_id={user_team_id} OR creator_id={user_id}")
+
+        # 2. 先测试简单的查询，确保能查到数据
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_id = %s", (user_team_id,))
+        assigned_count = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE creator_id = %s", (user_id,))
+        creator_count = cursor.fetchone()[0]
+
+        print(f"🔍 分配给团队 {user_team_id} 的任务数: {assigned_count}")
+        print(f"🔍 用户 {user_id} 创建的任务数: {creator_count}")
+
+        # 3. 执行主查询
         cursor.execute("""
             SELECT
                 t.id, t.title, t.description, t.start_time, t.end_time,
@@ -251,15 +220,22 @@ def get_user_tasks():
             LEFT JOIN sys_user creator ON t.creator_id = creator.id
             WHERE t.assigned_id = %s OR t.creator_id = %s
             ORDER BY t.start_time
-        """, (user_id, user_id))
+        """, (user_team_id, user_id))
 
         tasks = cursor.fetchall()
+
+        print(f"🔍 查询结果: 找到 {len(tasks)} 个任务")
+        for task in tasks:
+            print(f"📋 任务: id={task[0]}, title='{task[1]}', assigned_id={task[8]}, creator_id={task[7]}")
+
         cursor.close()
 
         task_list = []
         for task in tasks:
-            # 根据任务状态和进度确定颜色
-            color = _get_task_color(task[6], task[5])  # status, progress
+            color = _get_task_color(task[6], task[5])
+
+            # 判断任务类型
+            task_type = "个人任务" if task[7] == user_id else "团队任务"
 
             task_list.append({
                 "id": task[0],
@@ -267,20 +243,28 @@ def get_user_tasks():
                 "description": task[2],
                 "start_date": task[3].strftime('%Y-%m-%d') if task[3] else None,
                 "end_date": task[4].strftime('%Y-%m-%d') if task[4] else None,
-                "progress": float(task[5]) / 100.0 if task[5] is not None else 0.0,  # 转换为0-1的小数
+                "progress": float(task[5]) / 100.0 if task[5] is not None else 0.0,
                 "status": task[6],
                 "creator_id": task[7],
                 "assigned_id": task[8],
                 "assignee_name": task[9],
                 "creator_name": task[10],
                 "color": color,
-                "is_milestone": False  # 可以根据需要从业务逻辑判断
+                "is_milestone": False,
+                "task_type": task_type
             })
 
         return jsonify({
             "code": 0,
             "data": task_list,
-            "count": len(task_list)
+            "count": len(task_list),
+            "debug_info": {
+                "user_id": user_id,
+                "user_team_id": user_team_id,
+                "assigned_task_count": assigned_count,
+                "created_task_count": creator_count,
+                "final_task_count": len(task_list)
+            }
         })
 
     except Exception as e:

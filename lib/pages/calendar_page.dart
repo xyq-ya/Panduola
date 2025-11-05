@@ -45,6 +45,14 @@ class _CalendarPageState extends State<CalendarPage> {
         final data = jsonDecode(response.body);
         if (data['code'] == 0) {
           final List<dynamic> taskData = data['data'] ?? [];
+
+          // 添加调试信息
+          print('原始任务数据:');
+          for (var i = 0; i < taskData.length; i++) {
+            final item = taskData[i];
+            print('任务${i + 1}: ${item['name']} | 开始: ${item['start_date']} | 结束: ${item['end_date']} | 进度: ${item['progress']}');
+          }
+
           setState(() {
             _tasks = taskData.map((item) => GanttTask(
               id: item['id'] ?? 0,
@@ -58,6 +66,7 @@ class _CalendarPageState extends State<CalendarPage> {
               assigneeName: item['assignee_name'] ?? '',
               creatorName: item['creator_name'] ?? '',
               description: item['description'] ?? '',
+              taskType: item['task_type'] ?? '团队任务',
             )).toList();
             _isLoading = false;
           });
@@ -110,6 +119,7 @@ class _CalendarPageState extends State<CalendarPage> {
         assigneeName: '超级管理员',
         creatorName: '超级管理员',
         description: '制定公司年度技术发展路线图和项目规划',
+        taskType: '团队任务',
       ),
       GanttTask(
         id: 2,
@@ -123,6 +133,7 @@ class _CalendarPageState extends State<CalendarPage> {
         assigneeName: '王伟',
         creatorName: '超级管理员',
         description: '技术部本季度重点工作和目标设定',
+        taskType: '团队任务',
       ),
       GanttTask(
         id: 3,
@@ -136,6 +147,7 @@ class _CalendarPageState extends State<CalendarPage> {
         assigneeName: '王伟',
         creatorName: '王伟',
         description: '将现有前端架构从Vue2升级到Vue3',
+        taskType: '团队任务',
       ),
     ];
   }
@@ -209,6 +221,20 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
+  // 获取任务类型颜色
+  Color _getTaskTypeColor(String taskType) {
+    switch (taskType) {
+      case '部门任务':
+        return Colors.green;
+      case '团队任务':
+        return Colors.blue;
+      case '个人任务':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
   // 大尺寸任务卡片
   Widget _buildMonthlyTaskCard(GanttTask t) {
     // 只显示当前月份的任务
@@ -236,6 +262,23 @@ class _CalendarPageState extends State<CalendarPage> {
         children: [
           Row(
             children: [
+              // 添加任务类型标签
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _getTaskTypeColor(t.taskType).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  t.taskType,
+                  style: TextStyle(
+                    color: _getTaskTypeColor(t.taskType),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   t.name,
@@ -273,6 +316,18 @@ class _CalendarPageState extends State<CalendarPage> {
             Text(
               '负责人: ${t.assigneeName}',
               style: const TextStyle(color: Colors.black54, fontSize: 12),
+            ),
+          ],
+          // 显示任务来源信息
+          if (t.taskType == "部门任务") ...[
+            const SizedBox(height: 4),
+            Text(
+              '📋 部门共享任务',
+              style: TextStyle(
+                color: Colors.green.shade700,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
           if (t.description.isNotEmpty) ...[
@@ -358,6 +413,7 @@ class _CalendarPageState extends State<CalendarPage> {
                         Text('结束日期：${_formatMd(t.endDate)}'),
                         Text('完成进度：${(t.progress * 100).toInt()}%'),
                         Text('状态：${_getStatusText(t.status)}'),
+                        Text('任务类型：${t.taskType}'),
                         if (t.assigneeName.isNotEmpty) Text('负责人：${t.assigneeName}'),
                         if (t.creatorName.isNotEmpty) Text('创建人：${t.creatorName}'),
                         if (t.description.isNotEmpty) Text('描述：${t.description}'),
@@ -522,20 +578,39 @@ class _CalendarPageState extends State<CalendarPage> {
                                 child: Container(width: 1, color: Colors.grey.shade100),
                               ),
 
-                            // 任务条
+                            // 任务条 - 完全重写日期计算逻辑
                             for (int idx = 0; idx < _tasks.length; idx++)
                               Builder(builder: (context) {
                                 final t = _tasks[idx];
-                                final startDiff = t.startDate.difference(firstDay).inDays;
-                                final endDiff = t.endDate.difference(firstDay).inDays;
 
-                                // 确保任务条在可见范围内
-                                final left = startDiff.clamp(0, totalDays - 1) * cellWidth;
-                                final width = ((endDiff - startDiff + 1).clamp(1, totalDays)) * cellWidth;
+                                // 计算任务在当前月份中的可见部分
+                                DateTime visibleStart = t.startDate.isAfter(firstDay) ? t.startDate : firstDay;
+                                DateTime visibleEnd = t.endDate.isBefore(lastDay) ? t.endDate : lastDay;
+
+                                // 如果任务完全不在当前月份，不显示
+                                if (visibleStart.isAfter(lastDay) || visibleEnd.isBefore(firstDay)) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                // 计算在甘特图中的位置
+                                int startDay = visibleStart.difference(firstDay).inDays;
+                                int endDay = visibleEnd.difference(firstDay).inDays;
+                                int duration = endDay - startDay + 1;
+
+                                // 确保位置在有效范围内
+                                if (startDay < 0) startDay = 0;
+                                if (startDay >= totalDays) return const SizedBox.shrink();
+                                if (duration <= 0) duration = 1;
+                                if (startDay + duration > totalDays) {
+                                  duration = totalDays - startDay;
+                                }
+
+                                final left = startDay * cellWidth;
+                                final width = duration * cellWidth;
                                 final top = idx * rowHeight + 4.0;
 
                                 return Positioned(
-                                  left: left,
+                                  left: left.toDouble(),
                                   top: top,
                                   child: GestureDetector(
                                     onTap: () {
@@ -551,6 +626,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                               Text('结束：${_formatMd(t.endDate)}'),
                                               Text('进度：${(t.progress * 100).toInt()}%'),
                                               Text('状态：${_getStatusText(t.status)}'),
+                                              Text('任务类型：${t.taskType}'),
                                               if (t.assigneeName.isNotEmpty) Text('负责人：${t.assigneeName}'),
                                             ],
                                           ),
@@ -562,7 +638,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                       );
                                     },
                                     child: Container(
-                                      width: width,
+                                      width: width.toDouble(),
                                       height: rowHeight - 8,
                                       decoration: BoxDecoration(
                                         color: t.color.withOpacity(0.9),
@@ -691,6 +767,7 @@ class GanttTask {
   final String assigneeName;
   final String creatorName;
   final String description;
+  final String taskType;
 
   GanttTask({
     required this.id,
@@ -704,6 +781,7 @@ class GanttTask {
     required this.assigneeName,
     required this.creatorName,
     required this.description,
+    required this.taskType,
   });
 }
 
