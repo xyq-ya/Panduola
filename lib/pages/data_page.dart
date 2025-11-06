@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+<<<<<<< Updated upstream
 
 class DataPage extends StatelessWidget {
   const DataPage({super.key});
@@ -12,6 +13,66 @@ class DataPage extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 6), Text(subtitle, style: const TextStyle(color: Colors.grey))])),
       ]),
+=======
+import 'package:provider/provider.dart';
+import '../providers/user_provider.dart';
+
+class DataPage extends StatefulWidget {
+  const DataPage({super.key});
+
+  @override
+  State<DataPage> createState() => _DataPageState();
+}
+
+class _DataPageState extends State<DataPage> {
+  int? _userId; // 页面私有变量，保存用户 id
+
+  @override
+  void initState() {
+    super.initState();
+    // 页面初始化时获取一次 Provider 中的 id
+    _userId = Provider.of<UserProvider>(context, listen: false).id;
+    print('页面获取的用户 id：$_userId');
+  }
+
+  Widget _statCard(String title, String subtitle, Color color, double percent) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(12), 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12), 
+              borderRadius: BorderRadius.circular(12)
+            ),
+            child: Center(
+              child: Text(
+                '${(percent*100).toInt()}%', 
+                style: TextStyle(color: color, fontWeight: FontWeight.bold)
+              )
+            )
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Text(subtitle, style: const TextStyle(color: Colors.grey))
+              ]
+            )
+          ),
+        ]
+      ),
+>>>>>>> Stashed changes
     );
   }
 
@@ -44,6 +105,7 @@ class DataPage extends StatelessWidget {
               Row(children: [
                 Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.smart_toy, color: Color(0xFF8A3FFC))),
                 const SizedBox(width: 12),
+<<<<<<< Updated upstream
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
                   Text('建议将周四的团队会议调整为线上进行', style: TextStyle(fontWeight: FontWeight.w600)),
                   SizedBox(height: 6),
@@ -59,3 +121,59 @@ class DataPage extends StatelessWidget {
     );
   }
 }
+=======
+                Expanded(child: _statCard('优先级分布', '高:18 · 中:35 · 低:47', Colors.orange, 0.47)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(top: 8),
+              decoration: BoxDecoration(
+                color: Colors.white, 
+                borderRadius: BorderRadius.circular(12), 
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('AI建议助手', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.shade50, 
+                          borderRadius: BorderRadius.circular(12)
+                        ),
+                        child: const Icon(Icons.smart_toy, color: Color(0xFF8A3FFC))
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text('建议将周四的团队会议调整为线上进行', style: TextStyle(fontWeight: FontWeight.w600)),
+                            SizedBox(height: 6),
+                            Text('平均可节省每位成员45分钟通勤时间', style: TextStyle(color: Colors.grey)),
+                          ]
+                        )
+                      ),
+                      TextButton(
+                        onPressed: () {},
+                        child: const Text('采纳建议 →')
+                      )
+                    ]
+                  )
+                ]
+              )
+            ),
+            const SizedBox(height: 40),
+          ]
+        )
+      ),
+    );
+  }
+}
+>>>>>>> Stashed changes

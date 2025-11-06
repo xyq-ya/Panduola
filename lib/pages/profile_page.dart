@@ -1,8 +1,106 @@
 import 'package:flutter/material.dart';
+<<<<<<< Updated upstream
+=======
+import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../providers/user_provider.dart';
+>>>>>>> Stashed changes
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
+<<<<<<< Updated upstream
+=======
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  bool loading = true;
+
+  // 用户信息
+  int? userId;
+  String name = '';
+  String role = '';
+  String department = '';
+  String team = '';
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 确保 context 可用后再获取 Provider
+    if (userId == null) {
+      userId = Provider.of<UserProvider>(context, listen: false).id;
+      print('当前用户 ID: $userId');
+      if (userId != null) _fetchUserInfo(userId!);
+    }
+  }
+
+  Future<void> _fetchUserInfo(int userId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('http://10.0.2.2:5000/api/user_info'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId}),
+      );
+
+      if (res.statusCode != 200) {
+        throw Exception('请求失败: ${res.statusCode}');
+      }
+
+      final body = jsonDecode(res.body);
+      print('接口返回: $body');
+
+      if (body['code'] != 0) {
+        throw Exception('接口错误: ${body['msg']}');
+      }
+
+      final data = body['data'];
+      setState(() {
+        name = data['username'] ?? '';
+        role = data['role_name'] ?? '';
+        department = data['department'] ?? '';
+        team = data['team'] ?? '';
+        loading = false;
+      });
+    } catch (e) {
+      print('获取用户信息失败: $e');
+      setState(() {
+        loading = false;
+      });
+    }
+  }
+
+  Widget _infoCard(String label, String value, Color color) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+>>>>>>> Stashed changes
   Widget _profileItem(IconData icon, String title, Color color) {
     return Container(
       decoration: BoxDecoration(gradient: LinearGradient(colors: [color.withOpacity(0.12), color.withOpacity(0.06)]), borderRadius: BorderRadius.circular(12)),
