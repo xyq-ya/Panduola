@@ -3,7 +3,7 @@ from flask import Flask
 from flask_cors import CORS
 from routes import bp
 import config
-import pymysql
+import pymysql  
 
 app = Flask(__name__)
 CORS(app)  # 允许 Flutter 跨域
