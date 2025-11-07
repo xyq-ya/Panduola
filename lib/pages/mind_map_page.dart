@@ -22,12 +22,6 @@ class _MindMapPageState extends State<MindMapPage> {
   List<String> teams = [];
   List<String> employees = [];
 
-  // 数据源
-  List<String> companyMatters = [];
-  List<Map<String, dynamic>> companyDispatched = [];
-  List<Map<String, dynamic>> personalTopItems = [];
-  List<Map<String, dynamic>> personalLogs = [];
-
   bool loading = true;
 
   @override
@@ -61,7 +55,6 @@ class _MindMapPageState extends State<MindMapPage> {
       });
 
       await _loadDropdowns();
-      await _loadMindMapData();
     } catch (e) {
       print('初始化用户信息错误: $e');
       setState(() {
@@ -125,64 +118,8 @@ class _MindMapPageState extends State<MindMapPage> {
       departments = newDepartments;
       teams = newTeams;
       employees = newEmployees;
+      loading = false;
     });
-  }
-
-  Future<void> _loadMindMapData() async {
-    try {
-      // 公司十大事项
-      final resMatters = await http.get(Uri.parse('http://10.0.2.2:5000/api/company_top_matters'));
-      if (resMatters.statusCode == 200) {
-        final body = jsonDecode(resMatters.body);
-        if (body['code'] == 0) {
-          final list = (body['data'] as List).cast<Map>();
-          companyMatters = list.map((e) => (e['title'] ?? '').toString()).toList();
-        }
-      }
-
-      // 公司十大派发任务
-      final resDispatched = await http.get(Uri.parse('http://10.0.2.2:5000/api/company_dispatched_tasks'));
-      if (resDispatched.statusCode == 200) {
-        final body = jsonDecode(resDispatched.body);
-        if (body['code'] == 0) {
-          companyDispatched = (body['data'] as List).cast<Map<String, dynamic>>();
-        }
-      }
-
-      // 个人十大展示项
-      if (_userId != null) {
-        final resPersonal = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/personal_top_items'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'user_id': _userId}),
-        );
-        if (resPersonal.statusCode == 200) {
-          final body = jsonDecode(resPersonal.body);
-          if (body['code'] == 0) {
-            personalTopItems = (body['data'] as List).cast<Map<String, dynamic>>();
-          }
-        }
-
-        // 个人日志
-        final resLogs = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/personal_logs'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'user_id': _userId}),
-        );
-        if (resLogs.statusCode == 200) {
-          final body = jsonDecode(resLogs.body);
-          if (body['code'] == 0) {
-            personalLogs = (body['data'] as List).cast<Map<String, dynamic>>();
-          }
-        }
-      }
-    } catch (e) {
-      print('加载导图数据错误: $e');
-    } finally {
-      setState(() {
-        loading = false;
-      });
-    }
   }
 
   // 权限判断
@@ -327,29 +264,11 @@ class _MindMapPageState extends State<MindMapPage> {
                                       color: Color(0xFF1E3A8A)),
                                 ),
                                 const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: companyMatters.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final title = companyMatters[index];
-                                        // 用不同颜色做区分
-                                        final color = index % 3 == 0
-                                            ? Colors.redAccent
-                                            : index % 3 == 1
-                                                ? Colors.orange
-                                                : Colors.green;
-                                        final bg = index % 3 == 0
-                                            ? Colors.red.shade50
-                                            : index % 3 == 1
-                                                ? Colors.yellow.shade50
-                                                : Colors.green.shade50;
-                                        return _priorityRow(title, color, bg);
-                                      },
-                                    ),
-                                  ),
-                                ),
+                                _priorityRow('Q4产品发布计划', Colors.redAccent, Colors.red.shade50),
+                                const SizedBox(height: 8),
+                                _priorityRow('年度预算审批', Colors.orange, Colors.yellow.shade50),
+                                const SizedBox(height: 8),
+                                _priorityRow('员工满意度调研', Colors.green, Colors.green.shade50),
                               ],
                             ),
                           ),
@@ -370,22 +289,11 @@ class _MindMapPageState extends State<MindMapPage> {
                                       color: Color(0xFFEC6A1E)),
                                 ),
                                 const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: companyDispatched.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final item = companyDispatched[index];
-                                        final status = (item['status'] ?? '').toString();
-                                        final isDone = status.contains('done') || status == 'completed' || status == '已完成';
-                                        final bg = isDone ? Colors.green.shade100 : Colors.orange.shade100;
-                                        final color = isDone ? Colors.green : Colors.orange;
-                                        return _taskRow(item['title'] ?? '', status, bg, color);
-                                      },
-                                    ),
-                                  ),
-                                ),
+                                _taskRow('完成原型设计', '进行中', Colors.orange.shade100, Colors.orange),
+                                const SizedBox(height: 8),
+                                _taskRow('整理用户反馈', '已完成', Colors.green.shade100, Colors.green),
+                                const SizedBox(height: 8),
+                                _taskRow('测试报告编写', '进行中', Colors.orange.shade100, Colors.orange),
                               ],
                             ),
                           ),
@@ -401,32 +309,20 @@ class _MindMapPageState extends State<MindMapPage> {
                           child: _card(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
+                              children: const [
+                                Text(
                                   '个人十大展示项',
                                   style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                       color: Color(0xFF6D28D9)),
                                 ),
-                                const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: personalTopItems.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final item = personalTopItems[index];
-                                        final title = (item['title'] ?? '').toString();
-                                        final end = (item['end_time'] ?? '').toString();
-                                        final status = (item['status'] ?? '').toString();
-                                        final icon = status == 'completed' || status == 'done' ? Icons.check_circle : Icons.circle_outlined;
-                                        final color = status == 'completed' || status == 'done' ? Colors.green : Colors.blue;
-                                        return _SimpleRow(icon: icon, color: color, title: title, time: end);
-                                      },
-                                    ),
-                                  ),
-                                ),
+                                SizedBox(height: 8),
+                                _SimpleRow(icon: Icons.circle_outlined, color: Colors.blue, title: '团队会议准备', time: '14:00'),
+                                SizedBox(height: 8),
+                                _SimpleRow(icon: Icons.circle_outlined, color: Colors.pink, title: '项目文档整理', time: '15:30'),
+                                SizedBox(height: 8),
+                                _SimpleRow(icon: Icons.check_circle, color: Colors.green, title: '周报提交（已完成）', time: ''),
                               ],
                             ),
                           ),
@@ -447,22 +343,9 @@ class _MindMapPageState extends State<MindMapPage> {
                                       color: Color(0xFFEC4899)),
                                 ),
                                 const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: personalLogs.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final log = personalLogs[index];
-                                        return _logItem(
-                                          (log['username'] ?? '').toString(),
-                                          (log['content'] ?? '').toString(),
-                                          (log['date'] ?? '').toString(),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ),
+                                _logItem('张三', '已完成需求分析文档初稿', '08:45'),
+                                const SizedBox(height: 8),
+                                _logItem('李四', '测试环境部署完成，进入联调', '09:30'),
                               ],
                             ),
                           ),
