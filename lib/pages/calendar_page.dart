@@ -237,8 +237,17 @@ class _CalendarPageState extends State<CalendarPage> {
 
   // 大尺寸任务卡片
   Widget _buildMonthlyTaskCard(GanttTask t) {
-    // 只显示当前月份的任务
-    if (t.startDate.month != _selectedDate.month && t.endDate.month != _selectedDate.month) {
+    final firstDay = DateTime(_selectedDate.year, _selectedDate.month, 1);
+    final lastDay = DateTime(_selectedDate.year, _selectedDate.month + 1, 0);
+
+    // 修改逻辑：只要任务在当前月份有时间的都显示
+    final bool isTaskInCurrentMonth =
+        (t.startDate.year == _selectedDate.year && t.startDate.month == _selectedDate.month) ||
+            (t.endDate.year == _selectedDate.year && t.endDate.month == _selectedDate.month) ||
+            (t.startDate.isBefore(firstDay) && t.endDate.isAfter(lastDay)) ||
+            (t.startDate.isBefore(lastDay) && t.endDate.isAfter(firstDay));
+
+    if (!isTaskInCurrentMonth) {
       return const SizedBox.shrink();
     }
 
@@ -461,6 +470,114 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
+  // 构建空日期指示器
+  Widget _buildEmptyDateIndicators(DateTime firstDay, DateTime lastDay, int totalDays, double cellWidth) {
+    // 找出所有有任务的日期
+    final Set<int> occupiedDays = {};
+
+    for (final task in _tasks) {
+      final taskStart = task.startDate.isAfter(firstDay) ? task.startDate : firstDay;
+      final taskEnd = task.endDate.isBefore(lastDay) ? task.endDate : lastDay;
+
+      if (taskStart.isAfter(lastDay) || taskEnd.isBefore(firstDay)) continue;
+
+      final startDay = taskStart.difference(firstDay).inDays;
+      final endDay = taskEnd.difference(firstDay).inDays;
+
+      for (int day = startDay; day <= endDay && day < totalDays; day++) {
+        occupiedDays.add(day);
+      }
+    }
+
+    // 找出空白的日期区域
+    final List<Widget> emptyIndicators = [];
+    int? currentEmptyStart;
+
+    for (int day = 0; day < totalDays; day++) {
+      if (!occupiedDays.contains(day)) {
+        // 开始新的空白区域
+        if (currentEmptyStart == null) {
+          currentEmptyStart = day;
+        }
+      } else {
+        // 结束当前的空白区域
+        if (currentEmptyStart != null) {
+          final emptyDuration = day - currentEmptyStart;
+          if (emptyDuration >= 3) { // 只对连续3天以上的空白区域显示提示
+            emptyIndicators.add(
+              Positioned(
+                left: currentEmptyStart * cellWidth,
+                child: Container(
+                  width: emptyDuration * cellWidth,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.event_busy, size: 12, color: Colors.grey.shade600),
+                      const SizedBox(width: 4),
+                      Text(
+                        '暂无任务',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+          currentEmptyStart = null;
+        }
+      }
+    }
+
+    // 处理最后一段空白区域
+    if (currentEmptyStart != null) {
+      final emptyDuration = totalDays - currentEmptyStart;
+      if (emptyDuration >= 3) {
+        emptyIndicators.add(
+          Positioned(
+            left: currentEmptyStart * cellWidth,
+            child: Container(
+              width: emptyDuration * cellWidth,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.event_busy, size: 12, color: Colors.grey.shade600),
+                  const SizedBox(width: 4),
+                  Text(
+                    '暂无任务',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return Stack(
+      children: emptyIndicators,
+    );
+  }
+
   // 甘特图组件
   Widget _buildGanttChart() {
     if (_isLoading) {
@@ -494,13 +611,27 @@ class _CalendarPageState extends State<CalendarPage> {
     const double cellWidth = 48.0;
     final double totalWidth = totalDays * cellWidth;
     final double rowHeight = 34.0;
-    final double chartHeight = _tasks.length * rowHeight + 40.0;
 
-    // 当前月份的任务（用于卡片显示）
-    final currentMonthTasks = _tasks.where((t) =>
-    t.startDate.month == _selectedDate.month ||
-        t.endDate.month == _selectedDate.month
-    ).toList();
+    // 计算甘特图高度：任务行 + 底部提示区域
+    final double chartHeight = _tasks.length * rowHeight + 60.0;
+
+    // 当前月份的任务（用于卡片显示）- 修改逻辑：只要任务在当前月份有时间的都显示
+    final currentMonthTasks = _tasks.where((t) {
+      final bool isTaskInCurrentMonth =
+          (t.startDate.year == _selectedDate.year && t.startDate.month == _selectedDate.month) ||
+              (t.endDate.year == _selectedDate.year && t.endDate.month == _selectedDate.month) ||
+              (t.startDate.isBefore(firstDay) && t.endDate.isAfter(lastDay)) ||
+              (t.startDate.isBefore(lastDay) && t.endDate.isAfter(firstDay));
+      return isTaskInCurrentMonth;
+    }).toList();
+
+    // 调试信息
+    print('📅 当前月份: ${_formatYearMonth(_selectedDate)}');
+    print('📋 总任务数: ${_tasks.length}');
+    print('📋 当月显示任务数: ${currentMonthTasks.length}');
+    for (var task in currentMonthTasks) {
+      print('   - ${task.name}: ${_formatMd(task.startDate)} ~ ${_formatMd(task.endDate)}');
+    }
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -543,18 +674,36 @@ class _CalendarPageState extends State<CalendarPage> {
                         children: List.generate(totalDays, (i) {
                           final date = firstDay.add(Duration(days: i));
                           final bool isWeekend = date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
+                          final bool isToday = date.year == DateTime.now().year &&
+                              date.month == DateTime.now().month &&
+                              date.day == DateTime.now().day;
                           return Container(
                             width: cellWidth,
                             height: 28,
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                                 border: Border(right: BorderSide(color: Colors.grey.shade300)),
-                                color: isWeekend ? Colors.grey.shade50 : Colors.white
+                                color: isToday ? Colors.blue.shade50 : (isWeekend ? Colors.grey.shade50 : Colors.white)
                             ),
-                            child: Text('${date.day}', style: TextStyle(
-                                fontSize: 12,
-                                color: isWeekend ? Colors.grey : Colors.black87
-                            )),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('${date.day}', style: TextStyle(
+                                  fontSize: 12,
+                                  color: isToday ? Colors.blue : (isWeekend ? Colors.grey : Colors.black87),
+                                  fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                                )),
+                                if (isToday) Container(
+                                  margin: const EdgeInsets.only(top: 2),
+                                  width: 4,
+                                  height: 4,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.blue,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ],
+                            ),
                           );
                         }),
                       ),
@@ -691,6 +840,16 @@ class _CalendarPageState extends State<CalendarPage> {
                         ),
                       ),
                     ),
+
+                    // 底部提示区域 - 在没有任何任务的日期下方显示提示
+                    Positioned(
+                      left: 0,
+                      top: _tasks.length * rowHeight + 40,
+                      child: SizedBox(
+                        width: totalWidth,
+                        child: _buildEmptyDateIndicators(firstDay, lastDay, totalDays, cellWidth),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -701,7 +860,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
           // 当月任务卡片列表
           if (currentMonthTasks.isNotEmpty) ...[
-            const Text('当月任务', style: TextStyle(
+            Text('当月任务 (${currentMonthTasks.length})', style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: Color(0xFF2563EB)
