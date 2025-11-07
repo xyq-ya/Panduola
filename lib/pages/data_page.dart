@@ -19,6 +19,83 @@ class DataPage extends StatefulWidget {
 
 class _DataPageState extends State<DataPage> {
   int? _userId; // 页面私有变量，保存用户 id
+  Future<Map<String, dynamic>>? _aiFutureMap;
+  // 如果后端返回了关键词/分数，保存在这里以驱动 UI 的动态展示
+  Map<String, int>? _remoteKeywords;
+  Map<String, double>? _remoteScores;
+  String _aiProvider = 'local';
+
+  void _refreshAi() {
+    setState(() {
+      _aiFutureMap = fetchAiAnalysisRaw(_sampleLogs).then((data) {
+        // debug log: print provider and a short preview for easier troubleshooting
+        try { print('fetchAiAnalysisRaw success, provider=${data['provider']}'); } catch (_) {}
+        // 尝试从返回中读取 keywords 字段以驱动标签和词云
+        final kws = <String, int>{};
+        try {
+          if (data.containsKey('keywords') && data['keywords'] is Map) {
+            (data['keywords'] as Map).forEach((k, v) {
+              kws[k.toString()] = int.tryParse(v.toString()) ?? 0;
+            });
+          }
+        } catch (_) {}
+        setState(() {
+          _remoteKeywords = kws.isNotEmpty ? kws : null;
+          _remoteScores = _remoteKeywords != null ? scoreKeywords(_remoteKeywords!) : null;
+          _aiProvider = data['provider']?.toString() ?? 'remote';
+        });
+        return data;
+      }).catchError((e) async {
+        // debug log: record the error to console to help trace network/backend issues
+        try { print('fetchAiAnalysisRaw failed: $e'); } catch (_) {}
+        final localMap = extractKeywords(_sampleLogs);
+        setState(() {
+          _remoteKeywords = localMap;
+          _remoteScores = scoreKeywords(localMap);
+          _aiProvider = 'local';
+        });
+        final local = aiAnalysis(localMap);
+        return {'analysis': local, 'provider': 'local', 'keywords': localMap};
+      });
+    });
+  }
+
+  // Chat UI state
+  final TextEditingController _aiInputController = TextEditingController();
+  final ScrollController _aiScrollController = ScrollController();
+  List<Map<String, String>> _chatMessages = [];
+  bool _aiSending = false;
+
+  Future<void> _sendAiChat(String text) async {
+    if (text.trim().isEmpty) return;
+    setState(() {
+      _chatMessages.add({'role': 'user', 'text': text});
+      _aiSending = true;
+      _aiInputController.clear();
+    });
+    try {
+      final resp = await fetchAiAnalysisRaw(text).timeout(const Duration(seconds: 30));
+      final assistant = resp['analysis']?.toString() ?? '（无回复）';
+      setState(() {
+        _chatMessages.add({'role': 'assistant', 'text': assistant});
+      });
+    } catch (e) {
+      // fallback to local analysis
+      final fallback = aiAnalysis(extractKeywords(text));
+      setState(() {
+        _chatMessages.add({'role': 'assistant', 'text': fallback});
+      });
+    } finally {
+      setState(() {
+        _aiSending = false;
+      });
+      // scroll to bottom
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (_aiScrollController.hasClients) {
+        _aiScrollController.animateTo(_aiScrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+      }
+    }
+  }
   // === AI_ANALYSIS: SAMPLE LOGS ===
   // demo 日志文本（现实中应从后端拉取）
   final String _sampleLogs = '''
@@ -35,6 +112,9 @@ class _DataPageState extends State<DataPage> {
     // 页面初始化时获取一次 Provider 中的 id
     _userId = Provider.of<UserProvider>(context, listen: false).id;
     print('页面获取的用户 id：$_userId');
+    // 使用统一的刷新方法发起初次 AI 请求，这样在 UI 上能清晰看到触发点并允许手动刷新
+    _aiFutureMap = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshAi());
   }
 
   Widget _statCard(String title, String subtitle, Color color, double percent) {
@@ -242,10 +322,15 @@ class _DataPageState extends State<DataPage> {
 
   @override
   Widget build(BuildContext context) {
-  final tags = ['优化','会议','设计','开发','测试','部署','文档','迭代'];
-  final freq = extractKeywords(_sampleLogs);
-  final scores = scoreKeywords(freq);
-  final ai = aiAnalysis(freq);
+  // 优先使用后端/远程返回的关键词与分数驱动标签和词云；若无则使用本地样例日志计算
+  final tags = _remoteKeywords != null
+    ? (_remoteKeywords!.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
+      .take(8)
+      .map((e) => e.key)
+      .toList()
+    : ['优化','会议','设计','开发','测试','部署','文档','迭代'];
+  final freq = _remoteKeywords ?? extractKeywords(_sampleLogs);
+  final scores = _remoteScores ?? scoreKeywords(freq);
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
@@ -310,9 +395,104 @@ class _DataPageState extends State<DataPage> {
                         const SizedBox(height: 12),
                         _buildBarChart(),
                         const SizedBox(height: 12),
-                        const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold)),
+                            Row(children: [
+                              Text('来源: ', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                              Text(_aiProvider, style: const TextStyle(fontWeight: FontWeight.w600)),
+                              const SizedBox(width: 8),
+                              ElevatedButton.icon(
+                                onPressed: _refreshAi,
+                                icon: const Icon(Icons.refresh, size: 16),
+                                label: const Text('刷新 AI 建议', style: TextStyle(fontSize: 12)),
+                                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                              )
+                            ])
+                          ],
+                        ),
                         const SizedBox(height: 6),
-                        Text(ai, style: const TextStyle(color: Colors.grey)),
+                        // Chat-style AI window: 如果 _chatMessages 为空，先用 FutureBuilder 拉取初始建议并塞入首条助手消息
+                        Container(
+                          height: 260,
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                          child: Column(
+                            children: [
+                              Expanded(
+                                child: _chatMessages.isEmpty
+                                    ? FutureBuilder<Map<String, dynamic>>(
+                                        future: _aiFutureMap,
+                                        builder: (context, snapshot) {
+                                          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: Text('正在加载 AI 建议...', style: TextStyle(color: Colors.grey)));
+                                          if (snapshot.hasError || snapshot.data == null) {
+                                            final local = aiAnalysis(freq);
+                                            return Padding(padding: const EdgeInsets.all(8.0), child: Text(local, style: const TextStyle(color: Colors.grey)));
+                                          }
+                                          final data = snapshot.data!;
+                                          final text = data['analysis']?.toString() ?? aiAnalysis(freq);
+                                          final provider = data['provider']?.toString() ?? 'remote';
+                                          // 如果返回中包含 keywords，保存以驱动页面其余区域（词云、标签）
+                                          if (data.containsKey('keywords') && data['keywords'] is Map) {
+                                            final kws = <String, int>{};
+                                            (data['keywords'] as Map).forEach((k, v) {
+                                              kws[k.toString()] = int.tryParse(v.toString()) ?? 0;
+                                            });
+                                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                                              setState(() {
+                                                _remoteKeywords = kws;
+                                                _remoteScores = scoreKeywords(kws);
+                                                _aiProvider = provider;
+                                              });
+                                            });
+                                          }
+                                          // seed the chat with initial assistant message
+                                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                                            if (_chatMessages.isEmpty) setState(() => _chatMessages.add({'role': 'assistant', 'text': '来源: $provider\n\n$text'}));
+                                          });
+                                          return const Center(child: Text('已加载 AI 建议，您可以在下方对话框继续询问。', style: TextStyle(color: Colors.grey)));
+                                        },
+                                      )
+                                    : ListView.builder(
+                                        controller: _aiScrollController,
+                                        itemCount: _chatMessages.length,
+                                        itemBuilder: (context, idx) {
+                                          final m = _chatMessages[idx];
+                                          final isUser = m['role'] == 'user';
+                                          return Align(
+                                            alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                                            child: Container(
+                                              margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                              padding: const EdgeInsets.all(10),
+                                              decoration: BoxDecoration(color: isUser ? Colors.blue.shade50 : Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                                              child: Text(m['text'] ?? '', style: TextStyle(color: isUser ? Colors.black87 : Colors.black87)),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _aiInputController,
+                                      enabled: !_aiSending,
+                                      decoration: const InputDecoration(hintText: '向 AI 提问，例如：如何优化会议？', isDense: true, border: OutlineInputBorder()),
+                                      onSubmitted: (v) => _sendAiChat(v),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton(
+                                    onPressed: _aiSending ? null : () => _sendAiChat(_aiInputController.text),
+                                    child: _aiSending ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('发送'),
+                                  )
+                                ],
+                              )
+                            ],
+                          ),
+                        ),
                         // === AI_ANALYSIS: UI END ===
                       ]
                     )

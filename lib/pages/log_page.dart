@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import '../utils/api.dart';
+import 'ai_debug_page.dart';
 import '../providers/user_provider.dart';
 
 /// ✅ 日志页面
@@ -148,6 +149,15 @@ class _LogPageState extends State<LogPage> {
             style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
         centerTitle: true,
         elevation: 1,
+        actions: [
+          IconButton(
+            tooltip: 'AI 调试',
+            icon: const Icon(Icons.smart_toy, color: Colors.deepPurple),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (c) => const AiDebugPage()));
+            },
+          ),
+        ],
       ),
       body: ListView(
         children: [
