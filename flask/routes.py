@@ -14,12 +14,11 @@ def login():
         return jsonify({"error": "用户名或密码不能为空"}), 400
 
     try:
-        conn = current_app.get_db_connection()
+        conn = current_app.db_conn
         cursor = conn.cursor()
         cursor.execute("SELECT id, password FROM sys_user WHERE username=%s", (username,))
         result = cursor.fetchone()
         cursor.close()
-        conn.close()
 
         if not result:
             return jsonify({"error": "用户不存在"}), 401
@@ -39,12 +38,11 @@ def login():
 @bp.route('/select_department', methods=['POST'])
 def select_department():
     try:
-        conn = current_app.get_db_connection()
+        conn = current_app.db_conn
         cursor = conn.cursor()
         cursor.execute("SELECT id, dept_name FROM sys_department")
         result = cursor.fetchall()
         cursor.close()
-        conn.close()
 
         dept_list = [{"id": r[0], "dept_name": r[1]} for r in result]  # ⚠ 返回 dept_name
         return jsonify({"code": 0, "data": dept_list})
@@ -57,25 +55,27 @@ def select_department():
 @bp.route('/select_team', methods=['POST'])
 def select_team():
     try:
-        data = request.get_json(silent=True) or {}
+        data = request.get_json() or {}
         dept_name = data.get("department")
+        if not dept_name:
+            return jsonify({"code": 1, "msg": "缺少部门名"})
 
-        conn = current_app.get_db_connection()
+        conn = current_app.db_conn
         cursor = conn.cursor()
+        cursor.execute("SELECT id FROM sys_department WHERE dept_name=%s", (dept_name,))
+        dept = cursor.fetchone()
+        if not dept:
+            cursor.close()
+            return jsonify({"code": 2, "msg": "部门不存在"})
 
-        if dept_name:
-            cursor.execute("SELECT id FROM sys_department WHERE dept_name=%s", (dept_name,))
-            dept = cursor.fetchone()
-            if not dept:
-                cursor.close(); conn.close()
-                return jsonify({"code": 2, "msg": "部门不存在"})
-            cursor.execute("SELECT id, team_name FROM sys_team WHERE department_id=%s", (dept[0],))
-        else:
-            cursor.execute("SELECT id, team_name FROM sys_team")
-
+        dept_id = dept[0]
+        cursor.execute("SELECT id, team_name FROM sys_team WHERE department_id=%s", (dept_id,))
         teams = cursor.fetchall()
-        cursor.close(); conn.close()
-        return jsonify({"code": 0, "data": [{"id": r[0], "team_name": r[1]} for r in teams]})
+        cursor.close()
+
+        team_list = [{"id": t[0], "team_name": t[1]} for t in teams]  # ⚠ 返回 team_name
+        return jsonify({"code": 0, "data": team_list})
+
     except Exception as e:
         print("select_team 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
@@ -84,28 +84,27 @@ def select_team():
 @bp.route('/select_user', methods=['POST'])
 def select_user():
     try:
-        data = request.get_json(silent=True) or {}
-        print("select_user recv:", data)
+        data = request.get_json() or {}
         team_name = data.get("team")
+        if not team_name:
+            return jsonify({"code": 1, "msg": "缺少团队名"})
 
-        conn = current_app.get_db_connection()
+        conn = current_app.db_conn
         cursor = conn.cursor()
+        cursor.execute("SELECT id FROM sys_team WHERE team_name=%s", (team_name,))
+        team = cursor.fetchone()
+        if not team:
+            cursor.close()
+            return jsonify({"code": 2, "msg": "团队不存在"})
 
-        if team_name:
-            print("select_user branch=team", team_name)
-            cursor.execute("SELECT id FROM sys_team WHERE team_name=%s", (team_name,))
-            team = cursor.fetchone()
-            if not team:
-                cursor.close(); conn.close()
-                return jsonify({"code": 2, "msg": "团队不存在"})
-            cursor.execute("SELECT id, name FROM sys_user WHERE team_id=%s", (team[0],))
-        else:
-            print("select_user branch=all")
-            cursor.execute("SELECT id, name FROM sys_user")
-
+        team_id = team[0]
+        cursor.execute("SELECT id, name FROM sys_user WHERE team_id=%s", (team_id,))
         users = cursor.fetchall()
-        cursor.close(); conn.close()
-        return jsonify({"code": 0, "data": [{"id": u[0], "username": u[1]} for u in users]})
+        cursor.close()
+
+        user_list = [{"id": u[0], "username": u[1]} for u in users]  # ⚠ 返回 username
+        return jsonify({"code": 0, "data": user_list})
+
     except Exception as e:
         print("select_user 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
@@ -119,7 +118,7 @@ def user_info():
         return jsonify({"code": 1, "msg": "缺少用户ID"})
 
     try:
-        conn = current_app.get_db_connection()
+        conn = current_app.db_conn
         cursor = conn.cursor()
         cursor.execute("SELECT name, role_id, team_id FROM sys_user WHERE id=%s", (user_id,))
         user = cursor.fetchone()
@@ -149,7 +148,7 @@ def user_info():
                     dept = cursor.fetchone()
                     dept_name = dept[0] if dept else None
 
-        cursor.close(); conn.close()
+        cursor.close()
         print("user_info 返回:", {
             "username": name,
             "role_id": role_id,
@@ -173,45 +172,44 @@ def user_info():
         print("user_info 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
 
+
 # -------------------- 创建任务 --------------------
 @bp.route('/create_task', methods=['POST'])
 def create_task():
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         title = data.get('title')
         description = data.get('description', '')
         creator_id = data.get('creator_id')
-        assigned_type = data.get('assigned_type', 'personal')  # personal/team/dept
+        assigned_type = data.get('assigned_type', 'personal')
         assigned_id = data.get('assigned_id')
         if not assigned_id:
             assigned_type = 'personal'
             assigned_id = creator_id
-        
+
         start_time = data.get('start_time')
         end_time = data.get('end_time')
+
+        if not title or not creator_id or not start_time or not end_time or not assigned_type:
+            return jsonify({"code": 1, "msg": "缺少必要字段"})
         
-        # 验证必填字段
-        if not title or not creator_id or not start_time or not end_time:
-            return jsonify({"code": 1, "msg": "缺少必填字段"})
-        
-        conn = current_app.get_db_connection()
+        if assigned_type == 'personal' :
+            if assigned_id == creator_id:
+                return jsonify({"code": 1, "msg": "不能给自己创建任务"})
+
+        conn = current_app.db_conn
         cursor = conn.cursor()
-        
-        # 插入任务
         cursor.execute(
-            """INSERT INTO biz_task 
-               (title, description, creator_id, assigned_type, assigned_id, start_time, end_time, status, progress)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', 0)""",
+            """INSERT INTO biz_task (title, description, creator_id, assigned_type, assigned_id, start_time, end_time, status, progress)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', 0)""",
             (title, description, creator_id, assigned_type, assigned_id, start_time, end_time)
         )
-        
         task_id = cursor.lastrowid
         conn.commit()
-        cursor.close(); conn.close()
+        cursor.close()
         
-        print(f"✅ 任务创建成功: id={task_id}, title={title}")
+        print(f"✅ create_task 成功: id={task_id}, title={title}")
         return jsonify({"code": 0, "msg": "任务创建成功", "data": {"task_id": task_id}})
-        
     except Exception as e:
         print("create_task 异常:", e)
         return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
@@ -222,29 +220,41 @@ def get_tasks():
     try:
         data = request.get_json() or {}
         user_id = data.get('user_id')
-        
         if not user_id:
             return jsonify({"code": 1, "msg": "缺少用户ID"})
-        
-        conn = current_app.get_db_connection()
+
+        conn = current_app.db_conn
         cursor = conn.cursor()
-        
-        # 获取用户创建的任务和分配给用户的任务
-        cursor.execute("""
-            SELECT t.id, t.title, t.description, t.start_time, t.end_time, 
+        # 先取当前用户的 team_id 与 department_id
+        cursor.execute("SELECT team_id FROM sys_user WHERE id=%s", (user_id,))
+        row = cursor.fetchone()
+        team_id = row[0] if row else None
+        dept_id = None
+        if team_id:
+            cursor.execute("SELECT department_id FROM sys_team WHERE id=%s", (team_id,))
+            r2 = cursor.fetchone()
+            dept_id = r2[0] if r2 else None
+
+        # 返回：我创建 / 指派给我 / 指派给我所在团队 / 指派给我所在部门
+        cursor.execute(
+            """
+            SELECT t.id, t.title, t.description, t.start_time, t.end_time,
                    t.status, t.progress, t.assigned_type, t.assigned_id,
                    u.name as creator_name
             FROM biz_task t
             LEFT JOIN sys_user u ON t.creator_id = u.id
-            WHERE t.creator_id = %s OR t.assigned_id = %s
+            WHERE t.creator_id = %s
+               OR (t.assigned_type = 'personal' AND t.assigned_id = %s)
+               OR (%s IS NOT NULL AND t.assigned_type = 'team' AND t.assigned_id = %s)
+               OR (%s IS NOT NULL AND t.assigned_type = 'dept' AND t.assigned_id = %s)
             ORDER BY t.create_time DESC
             LIMIT 50
-        """, (user_id, user_id))
-        
+            """,
+            (user_id, user_id, team_id, team_id, dept_id, dept_id),
+        )
         tasks = cursor.fetchall()
         cursor.close()
-        conn.close()
-        
+
         task_list = []
         for task in tasks:
             task_list.append({
@@ -257,11 +267,10 @@ def get_tasks():
                 "progress": task[6],
                 "assigned_type": task[7],
                 "assigned_id": task[8],
-                "creator_name": task[9]
+                "creator_name": task[9],
             })
-        
+
         return jsonify({"code": 0, "data": task_list})
-        
     except Exception as e:
         print("get_tasks 异常:", e)
         return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})

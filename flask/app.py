@@ -23,32 +23,9 @@ def init_db_connection():
 # 在 app 上挂载全局连接
 app.db_conn = init_db_connection()
 
-
-
-
-
-def get_db_connection():
-    return pymysql.connect(
-        host=config.DB_HOST,
-        user=config.DB_USER,
-        password=config.DB_PASSWORD,
-        database=config.DB_NAME,
-        charset=config.DB_CHARSET,
-        autocommit=True
-    )
-
-# 暴露给 routes.py 使用
-app.get_db_connection = get_db_connection
-
-
-
-
-
-
-
 # 注册蓝图
-from routes import bp
 app.register_blueprint(bp, url_prefix='/api')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # 单线程运行以配合全局单连接，避免并发请求争用同一连接
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False, threaded=False)

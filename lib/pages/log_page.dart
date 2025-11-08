@@ -1,11 +1,5 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-<<<<<<< Updated upstream
-
-class LogPage extends StatelessWidget {
-  const LogPage({super.key});
-
-  // 通用的颜色变暗函数（模拟 shade700）
-=======
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import '../providers/user_provider.dart';
@@ -115,16 +109,13 @@ class _LogPageState extends State<LogPage> {
   }
 }
 
->>>>>>> Stashed changes
   Color _darken(Color color, [double amount = .2]) {
     final hsl = HSLColor.fromColor(color);
     final lightness = (hsl.lightness - amount).clamp(0.0, 1.0);
     return hsl.withLightness(lightness).toColor();
   }
 
-  // 日志卡片生成函数
-  Widget _noteCard(
-      String title, String content, String time, Color tagColor, String tag) {
+  Widget _noteCard(String title, String content, String time, Color tagColor, String tag) {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
@@ -143,42 +134,29 @@ class _LogPageState extends State<LogPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: _darken(tagColor, 0.18),
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
+          Text(title,
+              style: TextStyle(
+                  color: _darken(tagColor, 0.18),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16)),
           const SizedBox(height: 6),
-          Text(
-            content,
-            style: const TextStyle(fontSize: 14, color: Colors.black87),
-          ),
+          Text(content, style: const TextStyle(fontSize: 14, color: Colors.black87)),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                time,
-                style: const TextStyle(color: Colors.grey, fontSize: 12),
-              ),
+              Text(time, style: const TextStyle(color: Colors.grey, fontSize: 12)),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: tagColor.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(
-                  tag,
-                  style: TextStyle(
-                    color: _darken(tagColor, 0.18),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                child: Text(tag,
+                    style: TextStyle(
+                        color: _darken(tagColor, 0.18),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500)),
               ),
             ],
           ),
@@ -189,68 +167,16 @@ class _LogPageState extends State<LogPage> {
 
   @override
   Widget build(BuildContext context) {
+    final canAddTask = _roleId != 5 && _roleId != null;
     return Scaffold(
       backgroundColor: const Color(0xFFF6F5F8),
       appBar: AppBar(
         backgroundColor: Colors.white,
-        title: const Text(
-          "日志记录",
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.deepPurple,
-          ),
-        ),
+        title: const Text("日志/任务记录",
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
         centerTitle: true,
         elevation: 1,
       ),
-<<<<<<< Updated upstream
-      body: ListView(
-        children: [
-          _noteCard(
-            "完成任务整理",
-            "已将导图任务节点划分为五个子模块。",
-            "2025-10-05 09:12",
-            Colors.purpleAccent,
-            "工作",
-          ),
-          _noteCard(
-            "系统性能优化",
-            "修复了加载缓慢的问题，响应速度提升约30%。",
-            "2025-10-04 16:45",
-            Colors.orangeAccent,
-            "优化",
-          ),
-          _noteCard(
-            "新增日历组件",
-            "在主页中集成了自定义日历选择器。",
-            "2025-10-03 11:23",
-            Colors.teal,
-            "开发",
-          ),
-          _noteCard(
-            "会议记录",
-            "讨论项目分支管理和版本控制。",
-            "2025-10-02 14:00",
-            Colors.blueAccent,
-            "会议",
-          ),
-          _noteCard(
-            "用户体验调研",
-            "收集了8位用户对交互界面的反馈。",
-            "2025-09-30 10:15",
-            Colors.pinkAccent,
-            "调研",
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // 可添加添加新日志逻辑
-        },
-        backgroundColor: Colors.purpleAccent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-=======
       body: RefreshIndicator(
         onRefresh: _fetchTasks,
         child: ListView(
@@ -304,6 +230,7 @@ class _LogPageState extends State<LogPage> {
               onPressed: () async {
                 // 调试：打印从日志页传入的团队名
                 print("[FAB] LogPage _teamName: ${_teamName}");
+                print("[FAB] LogPage _departmentName: ${_departmentName}");
                 // 保护：团队名未就绪时不进入创建页，避免空 team 触发全量返回
                 if (_teamName == null || _teamName!.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -319,6 +246,7 @@ class _LogPageState extends State<LogPage> {
                       userId: _userId!,
                       roleId: _roleId!,
                       teamName: _teamName,
+                      departmentName: _departmentName,
                     ),
                   ),
                 );
@@ -339,8 +267,9 @@ class AddTaskPage extends StatefulWidget {
   final int userId;
   final int roleId;
   final String? teamName;
+  final String? departmentName;
 
-  const AddTaskPage({super.key, required this.userId, required this.roleId, this.teamName});
+  const AddTaskPage({super.key, required this.userId, required this.roleId, this.teamName, this.departmentName});
 
   @override
   State<AddTaskPage> createState() => _AddTaskPageState();
@@ -354,6 +283,8 @@ class _AddTaskPageState extends State<AddTaskPage> {
   List<Map<String, dynamic>> _departments = [];
   List<Map<String, dynamic>> _teams = [];
   List<Map<String, dynamic>> _users = [];
+  bool _teamsRequested = false; // 防止重复自动拉取
+  bool _isLoadingTeams = false; // 团队列表加载中
 
   List<Map<String, dynamic>> _taskBlocks = [
     {
@@ -397,16 +328,32 @@ class _AddTaskPageState extends State<AddTaskPage> {
 
   Future<void> _fetchTeams() async {
     try {
+      print("[AddTaskPage] departmentName: ${widget.departmentName}");
+      final dept = (widget.departmentName ?? '').trim();
+      print("[AddTaskPage] select_team body: ${jsonEncode({"department": dept})}");
+      if (dept.isEmpty) {
+        print("[AddTaskPage] 部门名为空，跳过拉取团队");
+        debugPrint("[AddTaskPage] 部门名为空，跳过拉取团队");
+        return;
+      }
+      setState(() { _isLoadingTeams = true; });
+      final body = jsonEncode({"department": dept});
+      debugPrint("[AddTaskPage] select_team body: $body");
       final response = await http.post(
         Uri.parse('http://10.0.2.2:5000/api/select_team'),
         headers: {'Content-Type': 'application/json'},
+        body: body,
       );
+      print("[AddTaskPage] select_team status=${response.statusCode}, body=${response.body}");
+      debugPrint("[AddTaskPage] select_team status=${response.statusCode}, body=${response.body}");
       final data = jsonDecode(response.body);
       if (data['code'] == 0) {
         setState(() => _teams = List<Map<String, dynamic>>.from(data['data']));
       }
     } catch (e) {
       debugPrint("加载团队失败: $e");
+    } finally {
+      if (mounted) setState(() { _isLoadingTeams = false; });
     }
   }
 
@@ -427,8 +374,13 @@ class _AddTaskPageState extends State<AddTaskPage> {
       );
       final data = jsonDecode(response.body);
       print("[AddTaskPage] select_user status=${response.statusCode}, body=${response.body}");
+      
       if (data['code'] == 0) {
-        setState(() => _users = List<Map<String, dynamic>>.from(data['data']));
+        // 过滤掉当前用户，禁止给自己创建任务
+        final all = List<Map<String, dynamic>>.from(data['data']);
+        final filtered = all.where((u) => (u['id'] as int) != widget.userId).toList();
+        setState(() => _users = filtered);
+        //setState(() => _users = List<Map<String, dynamic>>.from(data['data']));
       }
     } catch (e) {
       debugPrint("加载用户失败: $e");
@@ -610,6 +562,12 @@ class _AddTaskPageState extends State<AddTaskPage> {
     final isDepartment = widget.roleId == 3;
     final isTeam = widget.roleId == 4;
 
+    // 若为部门角色且团队尚未加载，但部门名已可用，则自动触发一次加载
+    if (isDepartment && _teams.isEmpty && !_teamsRequested && ((widget.departmentName ?? '').trim().isNotEmpty)) {
+      _teamsRequested = true;
+      Future.microtask(_fetchTeams);
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("创建任务"),
@@ -673,13 +631,16 @@ class _AddTaskPageState extends State<AddTaskPage> {
                                     ))
                             .toList(),
                         onChanged: (v) => setState(() => block['department'] = v),
+                        validator: (v) => v == null || v.isEmpty ? "请选择部门" : null,
                       ),
                     ),
                   if (isDepartment)
-                    _buildCard(
+                      _buildCard(
                       child: DropdownButtonFormField<String>(
                         value: block['team'] as String?,
-                        hint: const Text("选择团队"),
+                        hint: Text(_isLoadingTeams
+                            ? "团队加载中..."
+                            : (_teams.isEmpty ? "暂无团队" : "选择团队")),
                         items: _teams
                             .map<DropdownMenuItem<String>>(
                                 (t) => DropdownMenuItem<String>(
@@ -687,7 +648,10 @@ class _AddTaskPageState extends State<AddTaskPage> {
                                       child: Text(t['team_name'] as String),
                                     ))
                             .toList(),
-                        onChanged: (v) => setState(() => block['team'] = v),
+                        onChanged: (_isLoadingTeams || _teams.isEmpty)
+                            ? null
+                            : (v) => setState(() => block['team'] = v),
+                        validator: (v) => v == null || v.isEmpty ? "请选择团队" : null,
                       ),
                     ),
                   if (isTeam)
@@ -703,6 +667,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
                                     ))
                             .toList(),
                         onChanged: (v) => setState(() => block['user'] = v),
+                        validator: (v) => v == null || v.isEmpty ? "请选择员工" : null,
                       ),
                     ),
                   _buildCard(
@@ -784,9 +749,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
               child: const Text("创建任务", style: TextStyle(fontSize: 16, color: Colors.white)),
             ),
           ],
->>>>>>> Stashed changes
         ),
-        child: const Icon(Icons.add, size: 28, color: Colors.white),
       ),
     );
   }

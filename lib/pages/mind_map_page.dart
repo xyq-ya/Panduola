@@ -1,17 +1,12 @@
 import 'package:flutter/material.dart';
-<<<<<<< Updated upstream
-=======
 import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
->>>>>>> Stashed changes
 
-class MindMapPage extends StatelessWidget {
+class MindMapPage extends StatefulWidget {
   const MindMapPage({super.key});
 
-<<<<<<< Updated upstream
-=======
   @override
   State<MindMapPage> createState() => _MindMapPageState();
 }
@@ -167,7 +162,6 @@ class _MindMapPageState extends State<MindMapPage> {
     );
   }
 
->>>>>>> Stashed changes
   Widget _card({required Widget child, EdgeInsets? margin}) {
     return Container(
       margin: margin ?? const EdgeInsets.all(0),
@@ -184,16 +178,6 @@ class _MindMapPageState extends State<MindMapPage> {
 
   @override
   Widget build(BuildContext context) {
-<<<<<<< Updated upstream
-    // two-column grid
-    return SafeArea(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-=======
     if (loading) return const Center(child: CircularProgressIndicator());
 
     return Column(
@@ -211,90 +195,48 @@ class _MindMapPageState extends State<MindMapPage> {
             border: Border(bottom: BorderSide(color: Color(0xFFD1E8FF), width: 2)),
           ),
           child: Row(
->>>>>>> Stashed changes
             children: [
-              SizedBox(
-                width: (MediaQuery.of(context).size.width - 48) / 2,
-                child: _card(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(color: const Color(0xFF87CEEB), borderRadius: BorderRadius.circular(12)),
-                        child: const Text('重要', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text('公司十大事项', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A))),
-                      const SizedBox(height: 10),
-                      Column(
-                        children: [
-                          _priorityRow('Q4产品发布计划', Colors.redAccent, Colors.red.shade50),
-                          const SizedBox(height: 8),
-                          _priorityRow('年度预算审批', Colors.orange, Colors.yellow.shade50),
-                          const SizedBox(height: 8),
-                          _priorityRow('员工满意度调研', Colors.green, Colors.green.shade50),
-                        ],
-                      )
-                    ],
-                  ),
+              Expanded(
+                child: _buildDropdown(
+                  label: '部门',
+                  value: selectedDepartment,
+                  items: departments,
+                  onChanged: (v) => setState(() {
+                    selectedDepartment = v;
+                    selectedTeam = null;
+                    selectedEmployee = null;
+                    _loadDropdowns();
+                  }),
+                  enabled: canSelectDepartment,
                 ),
               ),
-              SizedBox(
-                width: (MediaQuery.of(context).size.width - 48) / 2,
-                child: _card(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('公司10大派发任务', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFEC6A1E))),
-                      const SizedBox(height: 8),
-                      _taskRow('完成原型设计', 'https://modao.cc/ai/uploads/ai_pics/24/249693/aigp_1757741567.jpeg', '进行中', Colors.orange.shade100, Colors.orange),
-                      const SizedBox(height: 8),
-                      _taskRow('整理用户反馈', 'https://modao.cc/ai/uploads/ai_pics/24/249694/aigp_1757741569.jpeg', '已完成', Colors.green.shade100, Colors.green),
-                      const SizedBox(height: 8),
-                      _taskRow('测试报告编写', 'https://modao.cc/ai/uploads/ai_pics/24/249695/aigp_1757741571.jpeg', '进行中', Colors.orange.shade100, Colors.orange),
-                    ],
-                  ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildDropdown(
+                  label: '团队',
+                  value: selectedTeam,
+                  items: teams,
+                  onChanged: (v) => setState(() {
+                    selectedTeam = v;
+                    selectedEmployee = null;
+                    _loadDropdowns();
+                  }),
+                  enabled: canSelectTeam,
                 ),
               ),
-              SizedBox(
-                width: (MediaQuery.of(context).size.width - 48) / 2,
-                child: _card(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text('个人10大重要展示项', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF6D28D9))),
-                      SizedBox(height: 8),
-                      _SimpleRow(icon: Icons.circle_outlined, color: Colors.blue, title: '团队会议准备', time: '14:00'),
-                      SizedBox(height: 8),
-                      _SimpleRow(icon: Icons.circle_outlined, color: Colors.pink, title: '项目文档整理', time: '15:30'),
-                      SizedBox(height: 8),
-                      _SimpleRow(icon: Icons.check_circle, color: Colors.green, title: '周报提交（已完成）', time: ''),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: (MediaQuery.of(context).size.width - 48) / 2,
-                child: _card(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('个人日志', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFEC4899))),
-                      const SizedBox(height: 8),
-                      _logItem('张三', '已完成需求分析文档初稿', '08:45', 'https://modao.cc/ai/uploads/ai_pics/24/249696/aigp_1757741573.jpeg'),
-                      const SizedBox(height: 8),
-                      _logItem('李四', '测试环境部署完成，进入联调', '09:30', 'https://modao.cc/ai/uploads/ai_pics/24/249697/aigp_1757741576.jpeg'),
-                    ],
-                  ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildDropdown(
+                  label: '员工',
+                  value: selectedEmployee,
+                  items: employees,
+                  onChanged: (v) => setState(() => selectedEmployee = v),
+                  enabled: canSelectEmployee,
                 ),
               ),
             ],
           ),
         ),
-<<<<<<< Updated upstream
-      ),
-=======
         // 页面卡片布局：四等分
         Expanded(
           child: Padding(
@@ -417,7 +359,6 @@ class _MindMapPageState extends State<MindMapPage> {
           ),
         ),
       ],
->>>>>>> Stashed changes
     );
   }
 
@@ -427,7 +368,11 @@ class _MindMapPageState extends State<MindMapPage> {
         Expanded(
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: bg, border: Border.all(color: bg)),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: bg,
+              border: Border.all(color: bg),
+            ),
             child: Text(title, style: const TextStyle(fontSize: 13)),
           ),
         ),
@@ -437,10 +382,18 @@ class _MindMapPageState extends State<MindMapPage> {
     );
   }
 
-  Widget _taskRow(String title, String avatar, String state, Color bg, Color textColor) {
+  Widget _taskRow(String title, String state, Color bg, Color textColor) {
     return Row(
       children: [
-        ClipOval(child: Image.network(avatar, width: 28, height: 28, fit: BoxFit.cover)),
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: Colors.grey[300],
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Icon(Icons.person, size: 16, color: Colors.grey),
+        ),
         const SizedBox(width: 8),
         Expanded(child: Text(title, style: const TextStyle(fontSize: 13))),
         const SizedBox(width: 8),
@@ -453,10 +406,18 @@ class _MindMapPageState extends State<MindMapPage> {
     );
   }
 
-  Widget _logItem(String name, String content, String time, String avatar) {
+  Widget _logItem(String name, String content, String time) {
     return Row(
       children: [
-        ClipOval(child: Image.network(avatar, width: 28, height: 28, fit: BoxFit.cover)),
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: Colors.grey[300],
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Icon(Icons.person, size: 16, color: Colors.grey),
+        ),
         const SizedBox(width: 8),
         Expanded(
           child: Container(
@@ -485,11 +446,13 @@ class _SimpleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(children: [
-      Icon(icon, color: color),
-      const SizedBox(width: 8),
-      Expanded(child: Text(title)),
-      if (time.isNotEmpty) Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-    ]);
+    return Row(
+      children: [
+        Icon(icon, color: color),
+        const SizedBox(width: 8),
+        Expanded(child: Text(title)),
+        if (time.isNotEmpty) Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+      ],
+    );
   }
 }
