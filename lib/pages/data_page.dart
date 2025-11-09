@@ -1,14 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'dart:async';
 import 'package:provider/provider.dart';
-// charts: use lightweight custom painters to avoid third-party SDK mismatch
 import '../providers/user_provider.dart';
 import '../services/ai_analysis.dart';
-
-// === AI_ANALYSIS: KEYWORD EXTRACTION ===
-
-// === AI_ANALYSIS: KEYWORD SCORING ===
-// (moved AI analysis helpers to lib/services/ai_analysis.dart)
+import '../services/data_service.dart';
 
 class DataPage extends StatefulWidget {
   const DataPage({super.key});
@@ -18,19 +14,75 @@ class DataPage extends StatefulWidget {
 }
 
 class _DataPageState extends State<DataPage> {
-  int? _userId; // 页面私有变量，保存用户 id
+  int? _userId;
   Future<Map<String, dynamic>>? _aiFutureMap;
-  // 如果后端返回了关键词/分数，保存在这里以驱动 UI 的动态展示
   Map<String, int>? _remoteKeywords;
   Map<String, double>? _remoteScores;
   String _aiProvider = 'local';
 
+  // 数据库数据状态
+  Map<String, dynamic>? _dashboardData;
+  bool _isLoading = false;
+  String _errorMessage = '';
+  bool _hasInitialLoad = false;
+
+  // 从数据库加载数据的方法
+  Future<void> _loadDashboardData() async {
+    if (_userId == null) {
+      setState(() {
+        _errorMessage = '用户未登录，无法加载数据';
+      });
+      return;
+    }
+    
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+    
+    try {
+      print('开始加载仪表盘数据，用户ID: $_userId');
+      final data = await DataService.getDashboardStats(_userId!)
+          .timeout(const Duration(seconds: 30));
+      
+      print('仪表盘数据加载成功: $data');
+      setState(() {
+        _dashboardData = data;
+        _isLoading = false;
+        _hasInitialLoad = true;
+      });
+    } catch (e) {
+      print('加载仪表盘数据失败: $e');
+      setState(() {
+        _isLoading = false;
+        _hasInitialLoad = true;
+        _errorMessage = _getErrorMessage(e);
+      });
+    }
+  }
+
+  // 错误信息处理
+  String _getErrorMessage(dynamic error) {
+    if (error is TimeoutException) {
+      return '数据库连接超时，请检查网络连接';
+    } else if (error.toString().contains('Connection refused') ||
+        error.toString().contains('Failed host lookup')) {
+      return '无法连接到数据库服务器';
+    } else if (error.toString().contains('401') ||
+        error.toString().contains('403')) {
+      return '用户权限不足，无法访问数据';
+    } else {
+      return '数据库连接失败: ${error.toString()}';
+    }
+  }
+
   void _refreshAi() {
     setState(() {
       _aiFutureMap = fetchAiAnalysisRaw(_sampleLogs).then((data) {
-        // debug log: print provider and a short preview for easier troubleshooting
-        try { print('fetchAiAnalysisRaw success, provider=${data['provider']}'); } catch (_) {}
-        // 尝试从返回中读取 keywords 字段以驱动标签和词云
+        try { 
+          print('fetchAiAnalysisRaw success, provider=${data['provider']}'); 
+        } catch (_) {}
+        
         final kws = <String, int>{};
         try {
           if (data.containsKey('keywords') && data['keywords'] is Map) {
@@ -39,19 +91,22 @@ class _DataPageState extends State<DataPage> {
             });
           }
         } catch (_) {}
+        
         setState(() {
           _remoteKeywords = kws.isNotEmpty ? kws : null;
-          _remoteScores = _remoteKeywords != null ? scoreKeywords(_remoteKeywords!) : null;
+          _remoteScores = _remoteKeywords != null ? _scoreKeywords(_remoteKeywords!) : null;
           _aiProvider = data['provider']?.toString() ?? 'remote';
         });
         return data;
       }).catchError((e) async {
-        // debug log: record the error to console to help trace network/backend issues
-        try { print('fetchAiAnalysisRaw failed: $e'); } catch (_) {}
+        try { 
+          print('fetchAiAnalysisRaw failed: $e'); 
+        } catch (_) {}
+        
         final localMap = extractKeywords(_sampleLogs);
         setState(() {
           _remoteKeywords = localMap;
-          _remoteScores = scoreKeywords(localMap);
+          _remoteScores = _scoreKeywords(localMap);
           _aiProvider = 'local';
         });
         final local = aiAnalysis(localMap);
@@ -74,13 +129,19 @@ class _DataPageState extends State<DataPage> {
       _aiInputController.clear();
     });
     try {
-      final resp = await fetchAiAnalysisRaw(text).timeout(const Duration(seconds: 30));
+      final messages = _chatMessages.map<Map<String, String>>((msg) => 
+        <String, String>{
+          'role': msg['role'] ?? 'user',
+          'content': msg['text'] ?? '',
+        }
+      ).toList();
+      
+      final resp = await fetchAiAnalysisRaw('', messages: messages).timeout(const Duration(seconds: 30));
       final assistant = resp['analysis']?.toString() ?? '（无回复）';
       setState(() {
         _chatMessages.add({'role': 'assistant', 'text': assistant});
       });
     } catch (e) {
-      // fallback to local analysis
       final fallback = aiAnalysis(extractKeywords(text));
       setState(() {
         _chatMessages.add({'role': 'assistant', 'text': fallback});
@@ -89,15 +150,17 @@ class _DataPageState extends State<DataPage> {
       setState(() {
         _aiSending = false;
       });
-      // scroll to bottom
       await Future.delayed(const Duration(milliseconds: 100));
       if (_aiScrollController.hasClients) {
-        _aiScrollController.animateTo(_aiScrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+        _aiScrollController.animateTo(
+          _aiScrollController.position.maxScrollExtent, 
+          duration: const Duration(milliseconds: 200), 
+          curve: Curves.easeOut
+        );
       }
     }
   }
-  // === AI_ANALYSIS: SAMPLE LOGS ===
-  // demo 日志文本（现实中应从后端拉取）
+
   final String _sampleLogs = '''
 周一: 与产品讨论需求，会议 2 小时；完成接口文档编写；
 周二: 代码实现模块 A，单元测试覆盖 80%；部署到测试环境；
@@ -106,458 +169,824 @@ class _DataPageState extends State<DataPage> {
 周五: 优化性能，压测，准备下周计划；
 ''';
 
+  // 本地关键词评分方法
+  Map<String, double> _scoreKeywords(Map<String, int> freq) {
+    if (freq.isEmpty) return {};
+    final maxValue = freq.values.reduce((a, b) => a > b ? a : b).toDouble();
+    final scores = <String, double>{};
+    freq.forEach((key, value) {
+      final logValue = log(value + 1);
+      final logMax = log(maxValue + 1);
+      final normalized = logValue / logMax;
+      scores[key] = 0.1 + normalized * 0.9;
+    });
+    return scores;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_userId == null) {
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      _userId = userProvider.id;
+      print('页面获取的用户 id：$_userId');
+      
+      if (!_hasInitialLoad) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _loadDashboardData();
+          _refreshAi();
+        });
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    // 页面初始化时获取一次 Provider 中的 id
-    _userId = Provider.of<UserProvider>(context, listen: false).id;
-    print('页面获取的用户 id：$_userId');
-    // 使用统一的刷新方法发起初次 AI 请求，这样在 UI 上能清晰看到触发点并允许手动刷新
-    _aiFutureMap = null;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshAi());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      if (userProvider.id != null) {
+        setState(() {
+          _userId = userProvider.id;
+        });
+      }
+    });
   }
 
-  Widget _statCard(String title, String subtitle, Color color, double percent) {
+  // 词云构建方法
+  Widget _buildWordCloud() {
+    if (_isLoading && _dashboardData == null) {
+      return _buildLoadingWidget('正在加载关键词数据...');
+    }
+    
+    if (_dashboardData == null) {
+      return _buildNoDataWidget('等待数据库连接...');
+    }
+    
+    final keywordMap = _dashboardData?['keywords'] as Map<String, dynamic>?;
+    
+    if (keywordMap == null || keywordMap.isEmpty) {
+      return _buildNoDataWidget('暂无关键词数据');
+    }
+    
+    final scores = _convertKeywordsToScores(keywordMap);
+    
+    final sortedEntries = scores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    
+    final topKeywords = sortedEntries.take(20).toList(); // 限制数量防止超距
+    
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        minHeight: 120,
+        maxHeight: 200, // 限制最大高度
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white, 
+          borderRadius: BorderRadius.circular(12)
+        ),
+        child: SingleChildScrollView( // 添加滚动防止超距
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            runSpacing: 6,
+            children: topKeywords.map((e) {
+              final size = 12 + (e.value * 20); // 减小字体大小范围
+              final color = Colors.primaries[e.key.hashCode % Colors.primaries.length];
+              return GestureDetector(
+                onTap: () => _showKeywordDetail(e.key),
+                child: Container(
+                  margin: const EdgeInsets.all(2),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: color.withOpacity(0.3), width: 1),
+                  ),
+                  child: Text(
+                    e.key, 
+                    style: TextStyle(
+                      fontSize: size, 
+                      color: color,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 加载中的显示组件
+  Widget _buildLoadingWidget(String message) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      width: double.infinity,
+      padding: const EdgeInsets.all(40),
       decoration: BoxDecoration(
         color: Colors.white, 
-        borderRadius: BorderRadius.circular(12), 
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
+        borderRadius: BorderRadius.circular(12)
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.12), 
-              borderRadius: BorderRadius.circular(12)
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 16,
             ),
-            child: Center(
-              child: Text(
-                '${(percent*100).toInt()}%', 
-                style: TextStyle(color: color, fontWeight: FontWeight.bold)
-              )
-            )
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                Text(subtitle, style: const TextStyle(color: Colors.grey))
-              ]
-            )
-          ),
-        ]
+        ],
       ),
     );
   }
 
-  Widget _buildWordCloud(Map<String, double> scores) {
-    // === AI_ANALYSIS: WORD CLOUD ===
-    // 按重要性调整字体大小
-    final widgets = scores.entries.map((e) {
-      final size = 12 + (e.value * 28);
-      final color = Colors.primaries[e.key.hashCode % Colors.primaries.length];
-      return GestureDetector(
-        onTap: () => _showKeywordDetail(e.key),
-        child: Padding(
-          padding: const EdgeInsets.all(4.0),
-          child: Text(e.key, style: TextStyle(fontSize: size, color: color)),
-        ),
-      );
-    }).toList();
+  // 关键词分数转换方法
+  Map<String, double> _convertKeywordsToScores(Map<String, dynamic> keywordMap) {
+    if (keywordMap.isEmpty) return {};
+    
+    final values = keywordMap.values.cast<int>().toList();
+    final maxValue = values.reduce((a, b) => a > b ? a : b).toDouble();
+    
+    final scores = <String, double>{};
+    keywordMap.forEach((key, value) {
+      final logValue = log(value + 1);
+      final logMax = log(maxValue + 1);
+      final normalized = logValue / logMax;
+      scores[key] = 0.1 + normalized * 0.9;
+    });
+    
+    return scores;
+  }
 
+  // 无数据时的显示组件
+  Widget _buildNoDataWidget(String message) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-      child: Wrap(children: widgets),
+      width: double.infinity,
+      padding: const EdgeInsets.all(40),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(12)
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.cloud_off, size: 48, color: Colors.grey.shade400),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 16,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          if (_errorMessage.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage,
+              style: TextStyle(
+                color: Colors.red.shade600,
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _loadDashboardData,
+            icon: const Icon(Icons.refresh),
+            label: const Text('重新连接'),
+          ),
+        ],
+      ),
     );
-    // === AI_ANALYSIS: WORD CLOUD END ===
   }
 
   void _showKeywordDetail(String word) {
-    // === AI_ANALYSIS: KEYWORD DETAIL (delegated to service) ===
-    final detail = keywordDetail(word, _sampleLogs);
+    final keywordMap = _dashboardData?['keywords'] as Map<String, dynamic>?;
+    final count = keywordMap?[word] ?? 0;
+    
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('关键词：$word'),
-        content: Text(detail),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭'))],
-      ),
-    );
-  }
-
-  Widget _buildPieChart() {
-    final values = [40.0, 30.0, 20.0, 10.0];
-    final labels = ['执行类', '沟通类', '规划类', '异常处理类'];
-    final colors = [Colors.blue, Colors.orange, Colors.green, Colors.red];
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-      child: Column(children: [
-        const Text('任务分类耗时占比', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 200,
-          child: LayoutBuilder(builder: (ctx, constraints) {
-            return GestureDetector(
-              onTapUp: (details) {
-                final local = details.localPosition;
-                _handlePieTap(local, constraints.biggest, values, labels);
-              },
-              child: CustomPaint(
-                painter: _PiePainter(values: values, colors: colors, labels: labels),
-                child: Container(),
-              ),
-            );
-          }),
-        ),
-      ]),
-    );
-  }
-
-  Widget _buildBarChart() {
-    final values = List.generate(7, (i) => ((i + 1) * 2).toDouble());
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-      child: Column(children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        title: Text('关键词分析: $word'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('工作效率趋势（近7天）', style: TextStyle(fontWeight: FontWeight.bold)),
-            Row(children: [
-              const Text('指标:'),
-              const SizedBox(width: 8),
-              DropdownButton<bool>(
-                value: _barShowCount,
-                items: const [
-                  DropdownMenuItem(value: true, child: Text('完成任务数')),
-                  DropdownMenuItem(value: false, child: Text('平均耗时')),
-                ],
-                onChanged: (v) => setState(() => _barShowCount = v ?? true),
-              ),
-              const SizedBox(width: 12),
-              const Text('目标线:'),
-              SizedBox(
-                width: 60,
-                child: TextFormField(
-                  initialValue: _barTarget.toString(),
-                  onFieldSubmitted: (s) {
-                    final val = double.tryParse(s);
-                    if (val != null) setState(() => _barTarget = val);
-                  },
-                ),
-              )
-            ])
+            Text('出现次数: $count'),
+            const SizedBox(height: 8),
+            if (_dashboardData != null)
+              const Text('数据来源: 实时数据库'),
           ],
         ),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 220,
-          child: CustomPaint(
-            painter: _BarPainter(values: values, target: _barTarget),
-            child: Container(),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: const Text('关闭')
           ),
-        )
-      ]),
-    );
-  }
-  
-
-  // AI analysis moved to lib/services/ai_analysis.dart (function: aiAnalysis)
-
-  // 交互状态：柱状图模式与目标线
-  bool _barShowCount = true; // true: 完成任务数, false: 平均耗时
-  double _barTarget = 3.0;
-
-  // 示例任务按分类映射（实际应来自后端）
-  final Map<String, List<String>> _tasksByCategory = {
-    '执行类': ['完成接口文档', '实现模块A', '性能优化'],
-    '沟通类': ['需求讨论会议', '团队同步会议'],
-    '规划类': ['编写周计划', '设计评审准备'],
-    '异常处理类': ['修复线上 bug', '处理第三方异常']
-  };
-
-  void _showTasksForCategory(String category) {
-    final list = _tasksByCategory[category] ?? [];
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('$category - 任务清单'),
-        content: SizedBox(
-          width: 400,
-          child: ListView(
-            shrinkWrap: true,
-            children: list.map((t) => ListTile(title: Text(t))).toList(),
-          ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭'))],
+        ],
       ),
     );
   }
 
-  void _handlePieTap(Offset localPos, Size size, List<double> values, List<String> labels) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final dx = localPos.dx - center.dx;
-    final dy = localPos.dy - center.dy;
-    final angle = (atan2(dy, dx) + 2 * pi) % (2 * pi);
-    final total = values.fold(0.0, (a, b) => a + b);
-    double accum = 0.0;
-    for (int i = 0; i < values.length; i++) {
-      final sweep = (values[i] / total) * 2 * pi;
-      if (angle >= accum && angle < accum + sweep) {
-        _showTasksForCategory(labels[i]);
-        return;
+  // 饼图构建方法 - 修复数据格式问题
+  Widget _buildPieChart() {
+    if (_isLoading && _dashboardData == null) {
+      return _buildLoadingWidget('正在加载分类数据...');
+    }
+    
+    if (_dashboardData == null) {
+      return _buildNoDataWidget('等待数据库连接...');
+    }
+    
+    final categoryData = _dashboardData?['category_ratio'] as Map<String, dynamic>?;
+    
+    if (categoryData == null || categoryData.isEmpty) {
+      return _buildNoDataWidget('暂无分类数据');
+    }
+    
+    // 确保数据格式正确
+    final List<PieChartItem> chartItems = [];
+    final colors = [Colors.blue, Colors.orange, Colors.green, Colors.red, Colors.purple, Colors.teal];
+    
+    categoryData.forEach((key, value) {
+      final double numericValue = (value is int) ? value.toDouble() : 
+                                (value is double) ? value : 
+                                double.tryParse(value.toString()) ?? 0.0;
+      if (numericValue > 0) {
+        chartItems.add(PieChartItem(
+          label: key,
+          value: numericValue,
+          color: colors[chartItems.length % colors.length]
+        ));
       }
-      accum += sweep;
+    });
+    
+    if (chartItems.isEmpty) {
+      return _buildNoDataWidget('分类数据为空');
+    }
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(12)
+      ),
+      child: Column(
+        children: [
+          const Text(
+            '任务分类耗时占比', 
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 180,
+            child: CustomPaint(
+              painter: _PiePainter(items: chartItems),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 图例 - 限制宽度防止超距
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 300),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: chartItems.map((item) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      color: item.color,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        '${item.label} (${item.value.toInt()}%)',
+                        style: const TextStyle(fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 柱状图构建方法 - 修复数据格式问题
+  Widget _buildBarChart() {
+    if (_isLoading && _dashboardData == null) {
+      return _buildLoadingWidget('正在加载趋势数据...');
+    }
+    
+    if (_dashboardData == null) {
+      return _buildNoDataWidget('等待数据库连接...');
+    }
+    
+    final trendData = _dashboardData?['trend'] as List<dynamic>?;
+    
+    if (trendData == null || trendData.isEmpty) {
+      return _buildNoDataWidget('暂无趋势数据');
+    }
+    
+    // 处理趋势数据
+    final List<BarChartItem> barItems = [];
+    
+    for (var item in trendData) {
+      if (item is Map<String, dynamic>) {
+        final date = item['date']?.toString() ?? '';
+        final count = (item['count'] is int) ? item['count'] as int : 
+                     (item['count'] is double) ? (item['count'] as double).toInt() :
+                     int.tryParse(item['count'].toString()) ?? 0;
+        
+        if (date.isNotEmpty && count > 0) {
+          barItems.add(BarChartItem(date: date, value: count.toDouble()));
+        }
+      }
+    }
+    
+    if (barItems.isEmpty) {
+      return _buildNoDataWidget('趋势数据格式错误');
+    }
+    
+    // 限制显示数量，防止超距
+    final displayItems = barItems.length > 7 ? barItems.sublist(0, 7) : barItems;
+    final maxValue = displayItems.map((e) => e.value).reduce((a, b) => a > b ? a : b);
+    
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(12)
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '工作效率趋势（近7天）', 
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+          ),
+          const SizedBox(height: 16),
+          
+          // 柱状图容器
+          Container(
+            height: 150,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: displayItems.map((item) {
+                final height = (item.value / (maxValue > 0 ? maxValue : 1)) * 80;
+                final isAboveTarget = item.value >= (maxValue * 0.8);
+                
+                return Flexible( // 使用Flexible防止超距
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        item.value.toInt().toString(), 
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: isAboveTarget ? Colors.green : Colors.grey,
+                        )
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        width: 24,
+                        height: height,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        decoration: BoxDecoration(
+                          color: isAboveTarget ? Colors.green : Colors.blue,
+                          borderRadius: BorderRadius.circular(4),
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              isAboveTarget ? Colors.green.shade600 : Colors.blue.shade600,
+                              isAboveTarget ? Colors.green.shade400 : Colors.blue.shade400,
+                            ]
+                          )
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 60),
+                        child: Text(
+                          _formatDate(item.date), 
+                          style: const TextStyle(fontSize: 10),
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          
+          // 图例说明
+          Container(
+            margin: const EdgeInsets.only(top: 16),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildLegendItem(Colors.blue, '正常'),
+                const SizedBox(width: 16),
+                _buildLegendItem(Colors.green, '超过目标'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(Color color, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: const TextStyle(fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  // 辅助方法：格式化日期显示
+  String _formatDate(String dateStr) {
+    try {
+      final date = DateTime.parse(dateStr);
+      final now = DateTime.now();
+      final difference = now.difference(date).inDays;
+      
+      if (difference == 0) return '今天';
+      if (difference == 1) return '昨天';
+      if (difference < 7) return '${difference}天前';
+      
+      return '${date.month}/${date.day}';
+    } catch (e) {
+      // 如果解析失败，尝试其他格式或返回原始字符串
+      if (dateStr.length >= 10) {
+        return dateStr.substring(5, 10); // 返回 MM-DD 格式
+      }
+      return dateStr;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-  // 优先使用后端/远程返回的关键词与分数驱动标签和词云；若无则使用本地样例日志计算
-  final tags = _remoteKeywords != null
-    ? (_remoteKeywords!.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
-      .take(8)
-      .map((e) => e.key)
-      .toList()
-    : ['优化','会议','设计','开发','测试','部署','文档','迭代'];
-  final freq = _remoteKeywords ?? extractKeywords(_sampleLogs);
-  final scores = _remoteScores ?? scoreKeywords(freq);
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white, 
-                borderRadius: BorderRadius.circular(12), 
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
-              ),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: tags.map((t) => Chip(
-                  label: Text(t),
-                  backgroundColor: Colors.blue.shade50
-                )).toList()
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(child: _statCard('任务进度分布', '已完成: 65% · 进行中: 20% · 未开始: 15%', Colors.green, 0.65)),
-                const SizedBox(width: 12),
-                Expanded(child: _statCard('优先级分布', '高:18 · 中:35 · 低:47', Colors.orange, 0.47)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(top: 8),
-              decoration: BoxDecoration(
-                color: Colors.white, 
-                borderRadius: BorderRadius.circular(12), 
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // === AI_ANALYSIS: UI START ===
-                  const Text('AI建议助手', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.purple.shade50, 
-                            borderRadius: BorderRadius.circular(12)
+      child: Scaffold(
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              // 数据库连接状态指示器
+              if (_errorMessage.isNotEmpty || _isLoading)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: _errorMessage.isNotEmpty ? Colors.orange[50] : Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _errorMessage.isNotEmpty ? Colors.orange : Colors.blue,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _errorMessage.isNotEmpty ? Icons.warning : Icons.info,
+                        color: _errorMessage.isNotEmpty ? Colors.orange[700] : Colors.blue[700],
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage.isNotEmpty 
+                              ? _errorMessage
+                              : '正在加载数据...',
+                          style: TextStyle(
+                            color: _errorMessage.isNotEmpty ? Colors.orange[700] : Colors.blue[700],
                           ),
-                          child: const Icon(Icons.smart_toy, color: Color(0xFF8A3FFC))
                         ),
-                        const SizedBox(height: 12),
-                        Text('关键词云', style: TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 8),
-                        _buildWordCloud(scores),
-                        const SizedBox(height: 12),
-                        _buildPieChart(),
-                        const SizedBox(height: 12),
-                        _buildBarChart(),
-                        const SizedBox(height: 12),
+                      ),
+                      if (_errorMessage.isNotEmpty)
+                        IconButton(
+                          onPressed: _loadDashboardData,
+                          icon: const Icon(Icons.refresh),
+                          color: Colors.orange[700],
+                        ),
+                    ],
+                  ),
+                ),
+
+              // 关键词分析卡片
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white, 
+                  borderRadius: BorderRadius.circular(12), 
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text('关键词分析', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        const SizedBox(width: 8),
+                        if (_dashboardData != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.green[50],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '实时数据',
+                              style: TextStyle(
+                                color: Colors.green[700],
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildWordCloud(),
+                  ],
+                ),
+              ),
+
+              // 饼图和柱状图卡片
+              Column(
+                children: [
+                  // 饼图卡片
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white, 
+                      borderRadius: BorderRadius.circular(12), 
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
+                    ),
+                    child: _buildPieChart(),
+                  ),
+                  
+                  // 柱状图卡片
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white, 
+                      borderRadius: BorderRadius.circular(12), 
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
+                    ),
+                    child: _buildBarChart(),
+                  ),
+                ],
+              ),
+
+              // AI分析卡片
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white, 
+                  borderRadius: BorderRadius.circular(12), 
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold)),
-                            Row(children: [
-                              Text('来源: ', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                              Text(_aiProvider, style: const TextStyle(fontWeight: FontWeight.w600)),
-                              const SizedBox(width: 8),
-                              ElevatedButton.icon(
-                                onPressed: _refreshAi,
-                                icon: const Icon(Icons.refresh, size: 16),
-                                label: const Text('刷新 AI 建议', style: TextStyle(fontSize: 12)),
-                                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
-                              )
-                            ])
+                            Text('来源: $_aiProvider', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                _loadDashboardData();
+                                _refreshAi();
+                              },
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: const Text('刷新数据'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              ),
+                            )
                           ],
                         ),
-                        const SizedBox(height: 6),
-                        // Chat-style AI window: 如果 _chatMessages 为空，先用 FutureBuilder 拉取初始建议并塞入首条助手消息
-                        Container(
-                          height: 260,
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                          child: Column(
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      height: 260,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50], 
+                        borderRadius: BorderRadius.circular(8)
+                      ),
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: _chatMessages.isEmpty
+                                ? FutureBuilder<Map<String, dynamic>>(
+                                    future: _aiFutureMap,
+                                    builder: (context, snapshot) {
+                                      if (snapshot.connectionState == ConnectionState.waiting) {
+                                        return const Center(child: CircularProgressIndicator());
+                                      }
+                                      if (snapshot.hasError || snapshot.data == null) {
+                                        final freq = _remoteKeywords ?? extractKeywords(_sampleLogs);
+                                        final local = aiAnalysis(freq);
+                                        return SingleChildScrollView(
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(8.0), 
+                                            child: Text(local),
+                                          ),
+                                        );
+                                      }
+                                      final data = snapshot.data!;
+                                      final text = data['analysis']?.toString() ?? '暂无分析结果';
+                                      return SingleChildScrollView(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(8.0),
+                                          child: Text(text),
+                                        ),
+                                      );
+                                    },
+                                  )
+                                : ListView.builder(
+                                    controller: _aiScrollController,
+                                    itemCount: _chatMessages.length,
+                                    itemBuilder: (context, idx) {
+                                      final m = _chatMessages[idx];
+                                      final isUser = m['role'] == 'user';
+                                      return Align(
+                                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                                        child: Container(
+                                          constraints: BoxConstraints(
+                                            maxWidth: MediaQuery.of(context).size.width * 0.7,
+                                          ),
+                                          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                                          padding: const EdgeInsets.all(10),
+                                          decoration: BoxDecoration(
+                                            color: isUser ? Colors.blue.shade50 : Colors.grey.shade100, 
+                                            borderRadius: BorderRadius.circular(8)
+                                          ),
+                                          child: Text(
+                                            m['text'] ?? '', 
+                                            style: const TextStyle(fontSize: 14),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
                             children: [
                               Expanded(
-                                child: _chatMessages.isEmpty
-                                    ? FutureBuilder<Map<String, dynamic>>(
-                                        future: _aiFutureMap,
-                                        builder: (context, snapshot) {
-                                          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: Text('正在加载 AI 建议...', style: TextStyle(color: Colors.grey)));
-                                          if (snapshot.hasError || snapshot.data == null) {
-                                            final local = aiAnalysis(freq);
-                                            return Padding(padding: const EdgeInsets.all(8.0), child: Text(local, style: const TextStyle(color: Colors.grey)));
-                                          }
-                                          final data = snapshot.data!;
-                                          final text = data['analysis']?.toString() ?? aiAnalysis(freq);
-                                          final provider = data['provider']?.toString() ?? 'remote';
-                                          // 如果返回中包含 keywords，保存以驱动页面其余区域（词云、标签）
-                                          if (data.containsKey('keywords') && data['keywords'] is Map) {
-                                            final kws = <String, int>{};
-                                            (data['keywords'] as Map).forEach((k, v) {
-                                              kws[k.toString()] = int.tryParse(v.toString()) ?? 0;
-                                            });
-                                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                                              setState(() {
-                                                _remoteKeywords = kws;
-                                                _remoteScores = scoreKeywords(kws);
-                                                _aiProvider = provider;
-                                              });
-                                            });
-                                          }
-                                          // seed the chat with initial assistant message
-                                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            if (_chatMessages.isEmpty) setState(() => _chatMessages.add({'role': 'assistant', 'text': '来源: $provider\n\n$text'}));
-                                          });
-                                          return const Center(child: Text('已加载 AI 建议，您可以在下方对话框继续询问。', style: TextStyle(color: Colors.grey)));
-                                        },
-                                      )
-                                    : ListView.builder(
-                                        controller: _aiScrollController,
-                                        itemCount: _chatMessages.length,
-                                        itemBuilder: (context, idx) {
-                                          final m = _chatMessages[idx];
-                                          final isUser = m['role'] == 'user';
-                                          return Align(
-                                            alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                                            child: Container(
-                                              margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                                              padding: const EdgeInsets.all(10),
-                                              decoration: BoxDecoration(color: isUser ? Colors.blue.shade50 : Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
-                                              child: Text(m['text'] ?? '', style: TextStyle(color: isUser ? Colors.black87 : Colors.black87)),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _aiInputController,
-                                      enabled: !_aiSending,
-                                      decoration: const InputDecoration(hintText: '向 AI 提问，例如：如何优化会议？', isDense: true, border: OutlineInputBorder()),
-                                      onSubmitted: (v) => _sendAiChat(v),
-                                    ),
+                                child: TextField(
+                                  controller: _aiInputController,
+                                  enabled: !_aiSending,
+                                  decoration: const InputDecoration(
+                                    hintText: '向 AI 提问...', 
+                                    isDense: true, 
+                                    border: OutlineInputBorder(),
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                   ),
-                                  const SizedBox(width: 8),
-                                  ElevatedButton(
-                                    onPressed: _aiSending ? null : () => _sendAiChat(_aiInputController.text),
-                                    child: _aiSending ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('发送'),
-                                  )
-                                ],
+                                  onSubmitted: (v) => _sendAiChat(v),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton(
+                                onPressed: _aiSending ? null : () => _sendAiChat(_aiInputController.text),
+                                child: _aiSending 
+                                    ? const SizedBox(
+                                        width: 16, 
+                                        height: 16, 
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      ) 
+                                    : const Text('发送'),
                               )
                             ],
-                          ),
-                        ),
-                        // === AI_ANALYSIS: UI END ===
-                      ]
-                    )
-                ]
-              )
-            ),
-            const SizedBox(height: 40),
-          ]
-        )
+                          )
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-// 将自定义绘图类放在文件末尾（顶层）
-class _PiePainter extends CustomPainter {
-  final List<double> values;
-  final List<Color> colors;
-  final List<String> labels;
-  _PiePainter({required this.values, required this.colors, required this.labels});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.fill;
-    final rect = Offset.zero & size;
-    final center = rect.center;
-    final radius = size.shortestSide / 2 - 8;
-    final total = values.fold(0.0, (a, b) => a + b);
-    double start = -pi / 2;
-    for (int i = 0; i < values.length; i++) {
-      final sweep = (values[i] / total) * 2 * pi;
-      paint.color = colors[i % colors.length];
-      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), start, sweep, true, paint);
-      start += sweep;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+// 饼图数据模型
+class PieChartItem {
+  final String label;
+  final double value;
+  final Color color;
+  
+  PieChartItem({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
 }
 
-class _BarPainter extends CustomPainter {
-  final List<double> values;
-  final double target;
-  _BarPainter({required this.values, this.target = 0.0});
+// 柱状图数据模型
+class BarChartItem {
+  final String date;
+  final double value;
+  
+  BarChartItem({
+    required this.date,
+    required this.value,
+  });
+}
+
+// 自定义饼图绘图类
+class _PiePainter extends CustomPainter {
+  final List<PieChartItem> items;
+  _PiePainter({required this.items});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.blue;
-    final w = size.width / (values.length * 2 + 1);
-    final maxv = values.fold(0.0, (a, b) => a > b ? a : b);
-    for (int i = 0; i < values.length; i++) {
-      final x = (i * 2 + 1) * w;
-      final h = (values[i] / maxv) * size.height;
-      canvas.drawRect(Rect.fromLTWH(x, size.height - h, w, h), paint);
-    }
-    if (target > 0) {
-      final tY = size.height - (target / (maxv == 0 ? 1 : maxv)) * size.height;
-      final line = Paint()
-        ..color = Colors.red
-        ..strokeWidth = 2;
-      canvas.drawLine(Offset(0, tY), Offset(size.width, tY), line);
+    final paint = Paint()
+      ..style = PaintingStyle.fill
+      ..strokeWidth = 2;
+    
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2 - 10;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    
+    final total = items.fold(0.0, (sum, item) => sum + item.value);
+    if (total == 0) return;
+    
+    double startAngle = -pi / 2; // 从12点方向开始
+    
+    for (final item in items) {
+      final sweepAngle = (item.value / total) * 2 * pi;
+      
+      paint.color = item.color;
+      canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
+      
+      startAngle += sweepAngle;
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
