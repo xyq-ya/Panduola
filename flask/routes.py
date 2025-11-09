@@ -171,6 +171,127 @@ def user_info():
     except Exception as e:
         print("user_info 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
+    
+
+# -------------------- 公司十大事项（公司层面主事项） --------------------
+@bp.route('/company_top_matters', methods=['GET'])
+def company_top_matters():
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        # 取公司层面主事项：由角色 1 或 2 创建，且为顶层任务
+        cursor.execute(
+            """
+            SELECT t.id, t.title
+            FROM biz_task t
+            JOIN sys_user u ON t.creator_id = u.id
+            WHERE u.role_id IN (1, 2) AND t.parent_id IS NULL
+            ORDER BY t.update_time DESC, t.create_time DESC
+            LIMIT 10
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [{"id": r[0], "title": r[1]} for r in rows]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("company_top_matters 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+
+# -------------------- 公司十大派发任务（由高权限派发） --------------------
+@bp.route('/company_dispatched_tasks', methods=['GET'])
+def company_dispatched_tasks():
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT t.id, t.title, t.status, t.progress
+            FROM biz_task t
+            JOIN sys_user u ON t.creator_id = u.id
+            WHERE u.role_id BETWEEN 1 AND 2
+            ORDER BY t.update_time DESC, t.create_time DESC
+            LIMIT 10
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [
+            {"id": r[0], "title": r[1], "status": r[2], "progress": r[3]} for r in rows
+        ]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("company_dispatched_tasks 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+
+# -------------------- 个人十大展示项（分配给个人的任务） --------------------
+@bp.route('/personal_top_items', methods=['POST'])
+def personal_top_items():
+    try:
+        body = request.get_json() or {}
+        user_id = body.get('user_id')
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        # 个人被分配的任务（assigned_id = user_id）
+        cursor.execute(
+            """
+            SELECT id, title, status, end_time
+            FROM biz_task
+            WHERE assigned_id = %s
+            ORDER BY update_time DESC, create_time DESC
+            LIMIT 10
+            """,
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [
+            {"id": r[0], "title": r[1], "status": r[2], "end_time": r[3].strftime('%Y-%m-%d') if r[3] else None}
+            for r in rows
+        ]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("personal_top_items 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+
+# -------------------- 个人日志（最近10条） --------------------
+@bp.route('/personal_logs', methods=['POST'])
+def personal_logs():
+    try:
+        body = request.get_json() or {}
+        user_id = body.get('user_id')
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT wl.id, u.name, wl.content, wl.log_date
+            FROM biz_work_log wl
+            JOIN sys_user u ON wl.user_id = u.id
+            WHERE wl.user_id = %s
+            ORDER BY wl.log_date DESC, wl.create_time DESC
+            LIMIT 10
+            """,
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [
+            {"id": r[0], "username": r[1], "content": r[2], "date": r[3].strftime('%Y-%m-%d')}
+            for r in rows
+        ]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("personal_logs 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
 
 # -------------------- 获取用户任务数据（用于甘特图） --------------------
 @bp.route('/get_user_tasks', methods=['POST'])
