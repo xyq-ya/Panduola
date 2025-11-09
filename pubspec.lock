@@ -80,7 +80,7 @@ packages:
     description:
       name: http
       sha256: bb2ce4590bc2667c96f318d68cac1b5a7987ec819351d32b1c987239a815e007
-      url: "https://pub.flutter-io.cn"
+      url: "https://mirrors.tuna.tsinghua.edu.cn/dart-pub/"
     source: hosted
     version: "1.5.0"
   http_parser:
@@ -88,7 +88,7 @@ packages:
     description:
       name: http_parser
       sha256: "178d74305e7866013777bab2c3d8726205dc5a4dd935297175b19a23a2e66571"
-      url: "https://pub.flutter-io.cn"
+      url: "https://mirrors.tuna.tsinghua.edu.cn/dart-pub/"
     source: hosted
     version: "4.1.2"
   leak_tracker:
@@ -146,13 +146,13 @@ packages:
       sha256: e3641ec5d63ebf0d9b41bd43201a66e3fc79a65db5f61fc181f04cd27aab950c
       url: "https://pub.flutter-io.cn"
     source: hosted
-    version: "1.16.0"
+    version: "1.17.0"
   nested:
     dependency: transitive
     description:
       name: nested
       sha256: "03bac4c528c64c95c722ec99280375a6f2fc708eec17c7b3f07253b626cd2a20"
-      url: "https://pub.flutter-io.cn"
+      url: "https://mirrors.tuna.tsinghua.edu.cn/dart-pub/"
     source: hosted
     version: "1.0.0"
   path:
@@ -168,7 +168,7 @@ packages:
     description:
       name: provider
       sha256: "4e82183fa20e5ca25703ead7e05de9e4cceed1fbd1eadc1ac3cb6f565a09f272"
-      url: "https://pub.flutter-io.cn"
+      url: "https://mirrors.tuna.tsinghua.edu.cn/dart-pub/"
     source: hosted
     version: "6.1.5+1"
   sky_engine:
@@ -231,6 +231,14 @@ packages:
       sha256: f9049c039ebfeb4cf7a7104a675823cd72dba8297f264b6637062516699fa006
       url: "https://pub.flutter-io.cn"
     source: hosted
+    version: "0.7.7"
+  typed_data:
+    dependency: transitive
+    description:
+      name: typed_data
+      sha256: f9049c039ebfeb4cf7a7104a675823cd72dba8297f264b6637062516699fa006
+      url: "https://mirrors.tuna.tsinghua.edu.cn/dart-pub/"
+    source: hosted
     version: "1.4.0"
   vector_math:
     dependency: transitive
@@ -253,9 +261,9 @@ packages:
     description:
       name: web
       sha256: "868d88a33d8a87b18ffc05f9f030ba328ffefba92d6c127917a2ba740f9cfe4a"
-      url: "https://pub.flutter-io.cn"
+      url: "https://mirrors.tuna.tsinghua.edu.cn/dart-pub/"
     source: hosted
     version: "1.1.1"
 sdks:
-  dart: ">=3.9.0 <4.0.0"
+  dart: ">=3.10.0-0 <4.0.0"
   flutter: ">=3.18.0-18.0.pre.54"
