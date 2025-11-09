@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../providers/user_provider.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -10,55 +12,147 @@ class CalendarPage extends StatefulWidget {
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  int? _userId;  // 页面私有变量，保存用户 id
+  int? _userId;
+  List<GanttTask> _tasks = [];
+  bool _isLoading = true;
+  DateTime _selectedDate = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    // 页面初始化时获取一次 Provider 中的 id
     _userId = Provider.of<UserProvider>(context, listen: false).id;
     print('页面获取的用户 id：$_userId');
+    _fetchTaskData();
   }
-  DateTime _selectedDate = DateTime(2025, 10, 1);
 
-  // 示例任务（固定时间示例）
-  final List<GanttTask> _tasks = [
-    GanttTask(
-      name: 'PRD骨架',
-      startDate: DateTime(2025, 10, 10),
-      endDate: DateTime(2025, 10, 12),
-      progress: 1.0,
-      color: const Color(0xFF1976D2),
-      isMilestone: false,
-    ),
-    GanttTask(
-      name: 'PRD文档收集',
-      startDate: DateTime(2025, 10, 12),
-      endDate: DateTime(2025, 10, 17),
-      progress: 0.8,
-      color: const Color(0xFF388E3C),
-      isMilestone: false,
-    ),
-    GanttTask(
-      name: '定稿（里程碑）',
-      startDate: DateTime(2025, 10, 17),
-      endDate: DateTime(2025, 10, 17),
-      progress: 1.0,
-      color: const Color(0xFFF57C00),
-      isMilestone: true,
-    ),
-    GanttTask(
-      name: '任务拆分及甘特图',
-      startDate: DateTime(2025, 10, 18),
-      endDate: DateTime(2025, 10, 22),
-      progress: 0.6,
-      color: const Color(0xFF7B1FA2),
-      isMilestone: false,
-    ),
-    // 可继续添加任务
-  ];
+  // 从后端获取任务数据
+  Future<void> _fetchTaskData() async {
+    if (_userId == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
 
-  // 小工具：格式化年月（不依赖 intl）
+    try {
+      final response = await http.post(
+        Uri.parse('http://10.0.2.2:5000/api/get_user_tasks'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId}),
+      );
+
+      print('任务数据响应: ${response.statusCode} - ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 0) {
+          final List<dynamic> taskData = data['data'] ?? [];
+
+          // 添加调试信息
+          print('原始任务数据:');
+          for (var i = 0; i < taskData.length; i++) {
+            final item = taskData[i];
+            print('任务${i + 1}: ${item['name']} | 开始: ${item['start_date']} | 结束: ${item['end_date']} | 进度: ${item['progress']}');
+          }
+
+          setState(() {
+            _tasks = taskData.map((item) => GanttTask(
+              id: item['id'] ?? 0,
+              name: item['name'] ?? '未命名任务',
+              startDate: DateTime.parse(item['start_date'] ?? DateTime.now().toString()),
+              endDate: DateTime.parse(item['end_date'] ?? DateTime.now().add(Duration(days: 1)).toString()),
+              progress: (item['progress'] ?? 0.0).toDouble(),
+              color: _parseColor(item['color']),
+              isMilestone: item['is_milestone'] ?? false,
+              status: item['status'] ?? 'pending',
+              assigneeName: item['assignee_name'] ?? '',
+              creatorName: item['creator_name'] ?? '',
+              description: item['description'] ?? '',
+              taskType: item['task_type'] ?? '团队任务',
+            )).toList();
+            _isLoading = false;
+          });
+          print('成功加载 ${_tasks.length} 个任务');
+        } else {
+          throw Exception('API错误: ${data['msg']}');
+        }
+      } else {
+        throw Exception('HTTP错误: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('获取任务数据失败: $e');
+      setState(() {
+        _isLoading = false;
+        // 如果获取失败，使用示例数据
+        _tasks = _getFallbackTasks();
+      });
+    }
+  }
+
+  // 解析颜色字符串
+  Color _parseColor(String? colorStr) {
+    if (colorStr == null || colorStr.isEmpty) {
+      return const Color(0xFF1976D2); // 默认蓝色
+    }
+
+    try {
+      // 处理 #FF0000 格式
+      if (colorStr.startsWith('#')) {
+        return Color(int.parse(colorStr.substring(1), radix: 16) + 0xFF000000);
+      }
+      return const Color(0xFF1976D2);
+    } catch (e) {
+      return const Color(0xFF1976D2);
+    }
+  }
+
+  // 备用数据（当API不可用时）
+  List<GanttTask> _getFallbackTasks() {
+    return [
+      GanttTask(
+        id: 1,
+        name: '公司年度项目规划',
+        startDate: DateTime(2024, 1, 1),
+        endDate: DateTime(2024, 12, 31),
+        progress: 0.3,
+        color: const Color(0xFF1976D2),
+        isMilestone: false,
+        status: 'pending',
+        assigneeName: '超级管理员',
+        creatorName: '超级管理员',
+        description: '制定公司年度技术发展路线图和项目规划',
+        taskType: '团队任务',
+      ),
+      GanttTask(
+        id: 2,
+        name: '技术部季度目标',
+        startDate: DateTime(2024, 1, 15),
+        endDate: DateTime(2024, 3, 31),
+        progress: 0.6,
+        color: const Color(0xFF388E3C),
+        isMilestone: false,
+        status: 'pending',
+        assigneeName: '王伟',
+        creatorName: '超级管理员',
+        description: '技术部本季度重点工作和目标设定',
+        taskType: '团队任务',
+      ),
+      GanttTask(
+        id: 3,
+        name: '前端架构升级',
+        startDate: DateTime(2024, 2, 1),
+        endDate: DateTime(2024, 6, 30),
+        progress: 0.2,
+        color: const Color(0xFFFF9800),
+        isMilestone: false,
+        status: 'pending',
+        assigneeName: '王伟',
+        creatorName: '王伟',
+        description: '将现有前端架构从Vue2升级到Vue3',
+        taskType: '团队任务',
+      ),
+    ];
+  }
+
+  // 小工具：格式化年月
   String _formatYearMonth(DateTime d) {
     final m = d.month.toString().padLeft(2, '0');
     return '${d.year} 年 $m 月';
@@ -77,7 +171,7 @@ class _CalendarPageState extends State<CalendarPage> {
       initialDate: _selectedDate,
       firstDate: DateTime(2018),
       lastDate: DateTime(2035),
-      helpText: '选择查看月份（会跳到具体日期，取其年月）',
+      helpText: '选择查看月份',
     );
     if (picked != null) {
       setState(() {
@@ -86,7 +180,13 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
-  // 年月选择卡片（样式接近 LogPage）
+  // 刷新数据
+  Future<void> _refreshData() async {
+    setState(() => _isLoading = true);
+    await _fetchTaskData();
+  }
+
+  // 年月选择卡片
   Widget _buildDateSelectorCard() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -106,6 +206,11 @@ class _CalendarPageState extends State<CalendarPage> {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepPurple),
             ),
           ),
+          IconButton(
+            onPressed: _refreshData,
+            icon: const Icon(Icons.refresh),
+            tooltip: '刷新数据',
+          ),
           TextButton.icon(
             onPressed: _pickDate,
             icon: const Icon(Icons.date_range),
@@ -116,156 +221,417 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  // 大尺寸任务卡片（当月的任务，视觉更突出 + 查看详情按钮）
-Widget _buildMonthlyTaskCard(GanttTask t) {
-  return Container(
-    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: t.color.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: t.color.withOpacity(0.22)),
-      boxShadow: [
-        BoxShadow(
-          color: t.color.withOpacity(0.08),
-          blurRadius: 6,
-          offset: const Offset(0, 3),
-        )
-      ],
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          t.name,
-          style: TextStyle(
-            color: t.color,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '${_formatMd(t.startDate)} - ${_formatMd(t.endDate)}',
-          style: const TextStyle(color: Colors.black54),
-        ),
-        const SizedBox(height: 10),
-        // 进度长条
-        LayoutBuilder(builder: (context, constraints) {
-          final max = constraints.maxWidth;
-          final barFull = max * 0.78;
-          final progressW = barFull * t.progress;
-          return Column(
+  // 获取任务类型颜色
+  Color _getTaskTypeColor(String taskType) {
+    switch (taskType) {
+      case '部门任务':
+        return Colors.green;
+      case '团队任务':
+        return Colors.blue;
+      case '个人任务':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // 大尺寸任务卡片
+  Widget _buildMonthlyTaskCard(GanttTask t) {
+    final firstDay = DateTime(_selectedDate.year, _selectedDate.month, 1);
+    final lastDay = DateTime(_selectedDate.year, _selectedDate.month + 1, 0);
+
+    // 修改逻辑：只要任务在当前月份有时间的都显示
+    final bool isTaskInCurrentMonth =
+        (t.startDate.year == _selectedDate.year && t.startDate.month == _selectedDate.month) ||
+            (t.endDate.year == _selectedDate.year && t.endDate.month == _selectedDate.month) ||
+            (t.startDate.isBefore(firstDay) && t.endDate.isAfter(lastDay)) ||
+            (t.startDate.isBefore(lastDay) && t.endDate.isAfter(firstDay));
+
+    if (!isTaskInCurrentMonth) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.color.withOpacity(0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: t.color.withOpacity(0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Stack(
-                children: [
-                  Container(
-                    height: 22,
-                    width: barFull,
-                    decoration: BoxDecoration(
-                      color: t.color.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+              // 添加任务类型标签
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _getTaskTypeColor(t.taskType).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  t.taskType,
+                  style: TextStyle(
+                    color: _getTaskTypeColor(t.taskType),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
                   ),
-                  Container(
-                    height: 22,
-                    width: progressW,
-                    decoration: BoxDecoration(
-                      color: t.color,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ],
+                ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: t.color.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${(t.progress * 100).toInt()}%',
-                      style: TextStyle(
-                        color: t.color,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  t.name,
+                  style: TextStyle(
+                    color: t.color,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
-                ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _getStatusColor(t.status).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _getStatusText(t.status),
+                  style: TextStyle(
+                    color: _getStatusColor(t.status),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ],
-          );
-        }),
-        const SizedBox(height: 10),
-        // ✅ 新增：查看详情按钮
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  title: Text(t.name,
-                      style: TextStyle(
-                          color: t.color, fontWeight: FontWeight.bold)),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('开始日期：${_formatMd(t.startDate)}'),
-                      Text('结束日期：${_formatMd(t.endDate)}'),
-                      Text('完成进度：${(t.progress * 100).toInt()}%'),
-                      if (t.isMilestone)
-                        const Text('类型：里程碑',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('关闭'),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${_formatMd(t.startDate)} - ${_formatMd(t.endDate)}',
+            style: const TextStyle(color: Colors.black54),
+          ),
+          if (t.assigneeName.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '负责人: ${t.assigneeName}',
+              style: const TextStyle(color: Colors.black54, fontSize: 12),
+            ),
+          ],
+          // 显示任务来源信息
+          if (t.taskType == "部门任务") ...[
+            const SizedBox(height: 4),
+            Text(
+              '📋 部门共享任务',
+              style: TextStyle(
+                color: Colors.green.shade700,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+          if (t.description.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              t.description,
+              style: const TextStyle(color: Colors.black54, fontSize: 12),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 10),
+          // 进度长条
+          LayoutBuilder(builder: (context, constraints) {
+            final max = constraints.maxWidth;
+            final barFull = max * 0.78;
+            final progressW = barFull * t.progress;
+            return Column(
+              children: [
+                Stack(
+                  children: [
+                    Container(
+                      height: 22,
+                      width: barFull,
+                      decoration: BoxDecoration(
+                        color: t.color.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    Container(
+                      height: 22,
+                      width: progressW,
+                      decoration: BoxDecoration(
+                        color: t.color,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ],
                 ),
-              );
-            },
-            icon: const Icon(Icons.info_outline, size: 20),
-            label: const Text('查看详情'),
-            style: TextButton.styleFrom(
-              foregroundColor: t.color,
-              textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: t.color.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${(t.progress * 100).toInt()}%',
+                        style: TextStyle(
+                          color: t.color,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          }),
+          const SizedBox(height: 10),
+          // 查看详情按钮
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    title: Text(t.name,
+                        style: TextStyle(
+                            color: t.color, fontWeight: FontWeight.bold)),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('开始日期：${_formatMd(t.startDate)}'),
+                        Text('结束日期：${_formatMd(t.endDate)}'),
+                        Text('完成进度：${(t.progress * 100).toInt()}%'),
+                        Text('状态：${_getStatusText(t.status)}'),
+                        Text('任务类型：${t.taskType}'),
+                        if (t.assigneeName.isNotEmpty) Text('负责人：${t.assigneeName}'),
+                        if (t.creatorName.isNotEmpty) Text('创建人：${t.creatorName}'),
+                        if (t.description.isNotEmpty) Text('描述：${t.description}'),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('关闭'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              icon: const Icon(Icons.info_outline, size: 20),
+              label: const Text('查看详情'),
+              style: TextButton.styleFrom(
+                foregroundColor: t.color,
+                textStyle: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 
+  // 获取状态颜色
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'completed': return Colors.green;
+      case 'in_progress': return Colors.blue;
+      case 'pending': return Colors.orange;
+      default: return Colors.grey;
+    }
+  }
 
-  // 甘特图：水平可滚动，日期刻度 + 任务条（任务区域高度固定以避免布局出错）
+  // 获取状态文本
+  String _getStatusText(String status) {
+    switch (status) {
+      case 'completed': return '已完成';
+      case 'in_progress': return '进行中';
+      case 'pending': return '未开始';
+      default: return '未知';
+    }
+  }
+
+  // 构建空日期指示器
+  Widget _buildEmptyDateIndicators(DateTime firstDay, DateTime lastDay, int totalDays, double cellWidth) {
+    // 找出所有有任务的日期
+    final Set<int> occupiedDays = {};
+
+    for (final task in _tasks) {
+      final taskStart = task.startDate.isAfter(firstDay) ? task.startDate : firstDay;
+      final taskEnd = task.endDate.isBefore(lastDay) ? task.endDate : lastDay;
+
+      if (taskStart.isAfter(lastDay) || taskEnd.isBefore(firstDay)) continue;
+
+      final startDay = taskStart.difference(firstDay).inDays;
+      final endDay = taskEnd.difference(firstDay).inDays;
+
+      for (int day = startDay; day <= endDay && day < totalDays; day++) {
+        occupiedDays.add(day);
+      }
+    }
+
+    // 找出空白的日期区域
+    final List<Widget> emptyIndicators = [];
+    int? currentEmptyStart;
+
+    for (int day = 0; day < totalDays; day++) {
+      if (!occupiedDays.contains(day)) {
+        // 开始新的空白区域
+        if (currentEmptyStart == null) {
+          currentEmptyStart = day;
+        }
+      } else {
+        // 结束当前的空白区域
+        if (currentEmptyStart != null) {
+          final emptyDuration = day - currentEmptyStart;
+          if (emptyDuration >= 3) { // 只对连续3天以上的空白区域显示提示
+            emptyIndicators.add(
+              Positioned(
+                left: currentEmptyStart * cellWidth,
+                child: Container(
+                  width: emptyDuration * cellWidth,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.event_busy, size: 12, color: Colors.grey.shade600),
+                      const SizedBox(width: 4),
+                      Text(
+                        '暂无任务',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+          currentEmptyStart = null;
+        }
+      }
+    }
+
+    // 处理最后一段空白区域
+    if (currentEmptyStart != null) {
+      final emptyDuration = totalDays - currentEmptyStart;
+      if (emptyDuration >= 3) {
+        emptyIndicators.add(
+          Positioned(
+            left: currentEmptyStart * cellWidth,
+            child: Container(
+              width: emptyDuration * cellWidth,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.event_busy, size: 12, color: Colors.grey.shade600),
+                  const SizedBox(width: 4),
+                  Text(
+                    '暂无任务',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return Stack(
+      children: emptyIndicators,
+    );
+  }
+
+  // 甘特图组件
   Widget _buildGanttChart() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_tasks.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(40),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Column(
+          children: [
+            Icon(Icons.calendar_today, size: 48, color: Colors.grey),
+            SizedBox(height: 16),
+            Text('暂无任务数据', style: TextStyle(fontSize: 16, color: Colors.grey)),
+            SizedBox(height: 8),
+            Text('您还没有被分配或创建任何任务', style: TextStyle(fontSize: 14, color: Colors.grey)),
+          ],
+        ),
+      );
+    }
+
     final firstDay = DateTime(_selectedDate.year, _selectedDate.month, 1);
     final lastDay = DateTime(_selectedDate.year, _selectedDate.month + 1, 0);
     final totalDays = lastDay.difference(firstDay).inDays + 1;
 
-    const double cellWidth = 48.0; // 每天格子的宽度
+    const double cellWidth = 48.0;
     final double totalWidth = totalDays * cellWidth;
-
-    // 计算任务显示在甘特图上的条高度与行高
     final double rowHeight = 34.0;
-    final double chartHeight = _tasks.length * rowHeight + 40.0; // + 标题与 padding
 
-    // 只取当月任务用于卡片展示（但甘特图仍展示所有任务）
-    final currentMonthTasks = _tasks.where((t) => t.startDate.month == _selectedDate.month || t.endDate.month == _selectedDate.month).toList();
+    // 计算甘特图高度：任务行 + 底部提示区域
+    final double chartHeight = _tasks.length * rowHeight + 60.0;
+
+    // 当前月份的任务（用于卡片显示）- 修改逻辑：只要任务在当前月份有时间的都显示
+    final currentMonthTasks = _tasks.where((t) {
+      final bool isTaskInCurrentMonth =
+          (t.startDate.year == _selectedDate.year && t.startDate.month == _selectedDate.month) ||
+              (t.endDate.year == _selectedDate.year && t.endDate.month == _selectedDate.month) ||
+              (t.startDate.isBefore(firstDay) && t.endDate.isAfter(lastDay)) ||
+              (t.startDate.isBefore(lastDay) && t.endDate.isAfter(firstDay));
+      return isTaskInCurrentMonth;
+    }).toList();
+
+    // 调试信息
+    print('📅 当前月份: ${_formatYearMonth(_selectedDate)}');
+    print('📋 总任务数: ${_tasks.length}');
+    print('📋 当月显示任务数: ${currentMonthTasks.length}');
+    for (var task in currentMonthTasks) {
+      print('   - ${task.name}: ${_formatMd(task.startDate)} ~ ${_formatMd(task.endDate)}');
+    }
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -278,10 +644,19 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('项目甘特图', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+          Row(
+            children: [
+              const Text('任务甘特图', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+              const SizedBox(width: 8),
+              Chip(
+                label: Text('${_tasks.length} 个任务'),
+                backgroundColor: Colors.blue.shade50,
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
 
-          // 水平可滚动区域：包含日期刻度与任务条（外层给一个固定高度，内部用 ConstrainedBox 保证宽度）
+          // 水平可滚动甘特图
           SizedBox(
             height: chartHeight,
             child: SingleChildScrollView(
@@ -290,7 +665,7 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
                 constraints: BoxConstraints(minWidth: totalWidth, maxWidth: totalWidth),
                 child: Stack(
                   children: [
-                    // 日期刻度（顶部）
+                    // 日期刻度
                     Positioned(
                       left: 0,
                       top: 0,
@@ -299,18 +674,42 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
                         children: List.generate(totalDays, (i) {
                           final date = firstDay.add(Duration(days: i));
                           final bool isWeekend = date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
+                          final bool isToday = date.year == DateTime.now().year &&
+                              date.month == DateTime.now().month &&
+                              date.day == DateTime.now().day;
                           return Container(
                             width: cellWidth,
                             height: 28,
                             alignment: Alignment.center,
-                            decoration: BoxDecoration(border: Border(right: BorderSide(color: Colors.grey.shade300)), color: isWeekend ? Colors.grey.shade50 : Colors.white),
-                            child: Text('${date.day}', style: TextStyle(fontSize: 12, color: isWeekend ? Colors.grey : Colors.black87)),
+                            decoration: BoxDecoration(
+                                border: Border(right: BorderSide(color: Colors.grey.shade300)),
+                                color: isToday ? Colors.blue.shade50 : (isWeekend ? Colors.grey.shade50 : Colors.white)
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('${date.day}', style: TextStyle(
+                                  fontSize: 12,
+                                  color: isToday ? Colors.blue : (isWeekend ? Colors.grey : Colors.black87),
+                                  fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                                )),
+                                if (isToday) Container(
+                                  margin: const EdgeInsets.only(top: 2),
+                                  width: 4,
+                                  height: 4,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.blue,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ],
+                            ),
                           );
                         }),
                       ),
                     ),
 
-                    // 任务条区（每个任务一行）
+                    // 任务条
                     Positioned(
                       left: 0,
                       top: 36,
@@ -319,7 +718,7 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
                         height: _tasks.length * rowHeight,
                         child: Stack(
                           children: [
-                            // 背景网格（竖线）
+                            // 背景网格
                             for (int i = 0; i < totalDays; i++)
                               Positioned(
                                 left: i * cellWidth,
@@ -328,20 +727,42 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
                                 child: Container(width: 1, color: Colors.grey.shade100),
                               ),
 
-                            // 每个任务条
+                            // 任务条 - 完全重写日期计算逻辑
                             for (int idx = 0; idx < _tasks.length; idx++)
                               Builder(builder: (context) {
                                 final t = _tasks[idx];
-                                final left = t.startDate.difference(firstDay).inDays * cellWidth;
-                                final width = (t.endDate.difference(t.startDate).inDays + 1) * cellWidth;
+
+                                // 计算任务在当前月份中的可见部分
+                                DateTime visibleStart = t.startDate.isAfter(firstDay) ? t.startDate : firstDay;
+                                DateTime visibleEnd = t.endDate.isBefore(lastDay) ? t.endDate : lastDay;
+
+                                // 如果任务完全不在当前月份，不显示
+                                if (visibleStart.isAfter(lastDay) || visibleEnd.isBefore(firstDay)) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                // 计算在甘特图中的位置
+                                int startDay = visibleStart.difference(firstDay).inDays;
+                                int endDay = visibleEnd.difference(firstDay).inDays;
+                                int duration = endDay - startDay + 1;
+
+                                // 确保位置在有效范围内
+                                if (startDay < 0) startDay = 0;
+                                if (startDay >= totalDays) return const SizedBox.shrink();
+                                if (duration <= 0) duration = 1;
+                                if (startDay + duration > totalDays) {
+                                  duration = totalDays - startDay;
+                                }
+
+                                final left = startDay * cellWidth;
+                                final width = duration * cellWidth;
                                 final top = idx * rowHeight + 4.0;
 
                                 return Positioned(
-                                  left: left,
+                                  left: left.toDouble(),
                                   top: top,
                                   child: GestureDetector(
                                     onTap: () {
-                                      // 可扩展：点击高亮或弹窗
                                       showDialog(
                                         context: context,
                                         builder: (_) => AlertDialog(
@@ -353,21 +774,30 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
                                               Text('开始：${_formatMd(t.startDate)}'),
                                               Text('结束：${_formatMd(t.endDate)}'),
                                               Text('进度：${(t.progress * 100).toInt()}%'),
-                                              if (t.isMilestone) const Text('里程碑'),
+                                              Text('状态：${_getStatusText(t.status)}'),
+                                              Text('任务类型：${t.taskType}'),
+                                              if (t.assigneeName.isNotEmpty) Text('负责人：${t.assigneeName}'),
                                             ],
                                           ),
-                                          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭'))],
+                                          actions: [TextButton(
+                                              onPressed: () => Navigator.pop(context),
+                                              child: const Text('关闭')
+                                          )],
                                         ),
                                       );
                                     },
                                     child: Container(
-                                      width: width,
+                                      width: width.toDouble(),
                                       height: rowHeight - 8,
                                       decoration: BoxDecoration(
                                         color: t.color.withOpacity(0.9),
                                         borderRadius: BorderRadius.circular(6),
                                         border: Border.all(color: t.color.darken(0.1)),
-                                        boxShadow: [BoxShadow(color: t.color.withOpacity(0.18), blurRadius: 4, offset: const Offset(0, 2))],
+                                        boxShadow: [BoxShadow(
+                                            color: t.color.withOpacity(0.18),
+                                            blurRadius: 4,
+                                            offset: const Offset(0, 2)
+                                        )],
                                       ),
                                       alignment: Alignment.centerLeft,
                                       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -376,18 +806,30 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
                                           Expanded(
                                             child: Text(
                                               t.name,
-                                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold
+                                              ),
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
-                                          if (t.isMilestone)
-                                            Container(
-                                              margin: const EdgeInsets.only(left: 6),
-                                              width: 18,
-                                              height: 18,
-                                              decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                                              child: Icon(Icons.flag, size: 12, color: t.color),
+                                          Container(
+                                            margin: const EdgeInsets.only(left: 6),
+                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.9),
+                                              borderRadius: BorderRadius.circular(4),
                                             ),
+                                            child: Text(
+                                              '${(t.progress * 100).toInt()}%',
+                                              style: TextStyle(
+                                                color: t.color,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -398,6 +840,16 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
                         ),
                       ),
                     ),
+
+                    // 底部提示区域 - 在没有任何任务的日期下方显示提示
+                    Positioned(
+                      left: 0,
+                      top: _tasks.length * rowHeight + 40,
+                      child: SizedBox(
+                        width: totalWidth,
+                        child: _buildEmptyDateIndicators(firstDay, lastDay, totalDays, cellWidth),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -406,10 +858,18 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
 
           const SizedBox(height: 12),
 
-          // 当月任务大卡片列表（只显示与当前月有交集的任务）
-          Column(
-            children: currentMonthTasks.map((t) => _buildMonthlyTaskCard(t)).toList(),
-          ),
+          // 当月任务卡片列表
+          if (currentMonthTasks.isNotEmpty) ...[
+            Text('当月任务 (${currentMonthTasks.length})', style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF2563EB)
+            )),
+            const SizedBox(height: 8),
+            Column(
+              children: currentMonthTasks.map((t) => _buildMonthlyTaskCard(t)).toList(),
+            ),
+          ],
         ],
       ),
     );
@@ -417,25 +877,33 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
 
   @override
   Widget build(BuildContext context) {
-    // body 使用 Column + Expanded 来确保垂直有约束，内部可用 SingleChildScrollView 垂直滚动
     return Scaffold(
       backgroundColor: const Color(0xFFF6F5F8),
       appBar: AppBar(
-        title: const Text('项目日历与甘特图', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text('任务日历与甘特图', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.deepPurple,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshData,
+            tooltip: '刷新数据',
+          ),
+        ],
       ),
       body: Column(
         children: [
           _buildDateSelectorCard(),
-          // Expanded 约束下面的可滚动内容高度，避免 RenderBox 错误
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  _buildGanttChart(),
-                  const SizedBox(height: 20),
-                ],
+            child: RefreshIndicator(
+              onRefresh: _refreshData,
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    _buildGanttChart(),
+                    const SizedBox(height: 20),
+                  ],
+                ),
               ),
             ),
           ),
@@ -447,20 +915,32 @@ Widget _buildMonthlyTaskCard(GanttTask t) {
 
 /// 数据类
 class GanttTask {
+  final int id;
   final String name;
   final DateTime startDate;
   final DateTime endDate;
   final double progress; // 0..1
   final Color color;
   final bool isMilestone;
+  final String status;
+  final String assigneeName;
+  final String creatorName;
+  final String description;
+  final String taskType;
 
   GanttTask({
+    required this.id,
     required this.name,
     required this.startDate,
     required this.endDate,
     required this.progress,
     required this.color,
     this.isMilestone = false,
+    required this.status,
+    required this.assigneeName,
+    required this.creatorName,
+    required this.description,
+    required this.taskType,
   });
 }
 
