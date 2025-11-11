@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../utils/api.dart';
 
 class MindMapPage extends StatefulWidget {
   const MindMapPage({super.key});
@@ -45,7 +46,7 @@ class _MindMapPageState extends State<MindMapPage> {
 
     try {
       final res = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/user_info'),
+  Uri.parse('${Api.baseUrl()}/api/user_info'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': _userId}),
       );
@@ -81,7 +82,7 @@ class _MindMapPageState extends State<MindMapPage> {
       // 部门
       if (_roleId! <= 2) {
         final res = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/select_department'),
+          Uri.parse('${Api.baseUrl()}/api/select_department'),
           headers: {'Content-Type': 'application/json'},
         );
         final deptData = jsonDecode(res.body)['data'] as List;
@@ -94,7 +95,7 @@ class _MindMapPageState extends State<MindMapPage> {
       if (_roleId! <= 2 || _roleId! == 3) {
         if (selectedDepartment != null) {
           final res = await http.post(
-            Uri.parse('http://10.0.2.2:5000/api/select_team'),
+            Uri.parse('${Api.baseUrl()}/api/select_team'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'department': selectedDepartment}),
           );
@@ -108,7 +109,7 @@ class _MindMapPageState extends State<MindMapPage> {
       // 员工
       if (_roleId! <= 4 && selectedTeam != null) {
         final res = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/select_user'),
+          Uri.parse('${Api.baseUrl()}/api/select_user'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'team': selectedTeam}),
         );

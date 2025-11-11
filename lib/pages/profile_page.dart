@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../utils/api.dart';
 import '../providers/user_provider.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -35,7 +36,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _fetchUserInfo(int userId) async {
     try {
       final res = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/user_info'),
+  Uri.parse('${Api.baseUrl()}/api/user_info'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': userId}),
       );
