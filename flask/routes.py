@@ -205,7 +205,7 @@ def user_info():
     except Exception as e:
         print("user_info 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
-
+    
 
 # -------------------- AI 分析 --------------------
 @bp.route('/ai_analyze', methods=['POST'])
