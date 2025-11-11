@@ -46,30 +46,53 @@ class _CalendarPageState extends State<CalendarPage> {
         if (data['code'] == 0) {
           final List<dynamic> taskData = data['data'] ?? [];
 
-          // 添加调试信息
-          print('原始任务数据:');
+          // 添加详细的调试信息
+          print('=== 原始任务数据详情 ===');
           for (var i = 0; i < taskData.length; i++) {
             final item = taskData[i];
-            print('任务${i + 1}: ${item['name']} | 开始: ${item['start_date']} | 结束: ${item['end_date']} | 进度: ${item['progress']}');
+            print('任务${i + 1}:');
+            print('  - name: ${item['name']}');
+            print('  - start_date: ${item['start_date']}');
+            print('  - end_date: ${item['end_date']}');
+            print('  - assigned_type: ${item['assigned_type']}');
+            print('  - assigned_type 类型: ${item['assigned_type']?.runtimeType}');
+            print('  - 所有字段: ${item.keys}');
           }
+          print('====================');
 
           setState(() {
-            _tasks = taskData.map((item) => GanttTask(
-              id: item['id'] ?? 0,
-              name: item['name'] ?? '未命名任务',
-              startDate: DateTime.parse(item['start_date'] ?? DateTime.now().toString()),
-              endDate: DateTime.parse(item['end_date'] ?? DateTime.now().add(Duration(days: 1)).toString()),
-              progress: (item['progress'] ?? 0.0).toDouble(),
-              color: _parseColor(item['color']),
-              isMilestone: item['is_milestone'] ?? false,
-              status: item['status'] ?? 'pending',
-              assigneeName: item['assignee_name'] ?? '',
-              creatorName: item['creator_name'] ?? '',
-              description: item['description'] ?? '',
-              taskType: item['task_type'] ?? '团队任务',
-            )).toList();
+            _tasks = taskData.map((item) {
+              // 调试每个任务的 assigned_type 值
+              final assignedType = item['assigned_type'];
+              print('映射任务 "${item['name']}": assigned_type = "$assignedType"');
+
+              return GanttTask(
+                id: item['id'] ?? 0,
+                name: item['name'] ?? '未命名任务',
+                startDate: DateTime.parse(item['start_date'] ?? DateTime.now().toString()),
+                endDate: DateTime.parse(item['end_date'] ?? DateTime.now().add(Duration(days: 1)).toString()),
+                progress: (item['progress'] ?? 0.0).toDouble(),
+                color: _parseColor(item['color']),
+                isMilestone: item['is_milestone'] ?? false,
+                status: item['status'] ?? 'pending',
+                assigneeName: item['assignee_name'] ?? '',
+                creatorName: item['creator_name'] ?? '',
+                description: item['description'] ?? '',
+                // 直接从数据库获取 assigned_type，如果为空则默认为 personal
+                assignedType: assignedType?.toString() ?? 'personal',
+              );
+            }).toList();
             _isLoading = false;
           });
+
+          // 添加处理后的任务数据调试
+          print('=== 处理后的任务数据 ===');
+          for (var i = 0; i < _tasks.length; i++) {
+            final task = _tasks[i];
+            print('任务${i + 1}: ${task.name} | 类型: ${task.assignedType} | 显示文本: ${_getTaskTypeDisplayText(task.assignedType)}');
+          }
+          print('====================');
+
           print('成功加载 ${_tasks.length} 个任务');
         } else {
           throw Exception('API错误: ${data['msg']}');
@@ -84,6 +107,31 @@ class _CalendarPageState extends State<CalendarPage> {
         // 如果获取失败，使用示例数据
         _tasks = _getFallbackTasks();
       });
+    }
+  }
+
+  // 根据 assigned_type 获取任务类型显示文本
+  String _getTaskTypeDisplayText(String assignedType) {
+    print('转换任务类型: "$assignedType" -> ${assignedType.toLowerCase()}');
+    switch (assignedType.toLowerCase()) {
+      case 'personal':
+        return '个人任务';
+      case 'team':
+        return '团队任务';
+      default:
+        return '未知任务';
+    }
+  }
+
+  // 根据 assigned_type 获取任务类型颜色
+  Color _getTaskTypeColor(String assignedType) {
+    switch (assignedType.toLowerCase()) {
+      case 'personal':
+        return Colors.orange;
+      case 'team':
+        return Colors.blue;
+      default:
+        return Colors.grey;
     }
   }
 
@@ -119,7 +167,7 @@ class _CalendarPageState extends State<CalendarPage> {
         assigneeName: '超级管理员',
         creatorName: '超级管理员',
         description: '制定公司年度技术发展路线图和项目规划',
-        taskType: '团队任务',
+        assignedType: 'personal', // 修正为 personal
       ),
       GanttTask(
         id: 2,
@@ -133,11 +181,11 @@ class _CalendarPageState extends State<CalendarPage> {
         assigneeName: '王伟',
         creatorName: '超级管理员',
         description: '技术部本季度重点工作和目标设定',
-        taskType: '团队任务',
+        assignedType: 'personal', // 修正为 personal
       ),
       GanttTask(
         id: 3,
-        name: '前端架构升级',
+        name: '个人学习计划',
         startDate: DateTime(2024, 2, 1),
         endDate: DateTime(2024, 6, 30),
         progress: 0.2,
@@ -146,8 +194,8 @@ class _CalendarPageState extends State<CalendarPage> {
         status: 'pending',
         assigneeName: '王伟',
         creatorName: '王伟',
-        description: '将现有前端架构从Vue2升级到Vue3',
-        taskType: '团队任务',
+        description: 'React新特性学习和实践',
+        assignedType: 'personal', // 修正为 personal
       ),
     ];
   }
@@ -221,20 +269,6 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  // 获取任务类型颜色
-  Color _getTaskTypeColor(String taskType) {
-    switch (taskType) {
-      case '部门任务':
-        return Colors.green;
-      case '团队任务':
-        return Colors.blue;
-      case '个人任务':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-
   // 大尺寸任务卡片
   Widget _buildMonthlyTaskCard(GanttTask t) {
     final firstDay = DateTime(_selectedDate.year, _selectedDate.month, 1);
@@ -271,17 +305,17 @@ class _CalendarPageState extends State<CalendarPage> {
         children: [
           Row(
             children: [
-              // 添加任务类型标签
+              // 添加任务类型标签 - 根据 assigned_type 显示
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: _getTaskTypeColor(t.taskType).withOpacity(0.1),
+                  color: _getTaskTypeColor(t.assignedType).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  t.taskType,
+                  _getTaskTypeDisplayText(t.assignedType),
                   style: TextStyle(
-                    color: _getTaskTypeColor(t.taskType),
+                    color: _getTaskTypeColor(t.assignedType),
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
                   ),
@@ -327,18 +361,16 @@ class _CalendarPageState extends State<CalendarPage> {
               style: const TextStyle(color: Colors.black54, fontSize: 12),
             ),
           ],
-          // 显示任务来源信息
-          if (t.taskType == "部门任务") ...[
-            const SizedBox(height: 4),
-            Text(
-              '📋 部门共享任务',
-              style: TextStyle(
-                color: Colors.green.shade700,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
+          // 显示任务类型信息
+          const SizedBox(height: 4),
+          Text(
+            _getTaskTypeDescription(t.assignedType),
+            style: TextStyle(
+              color: _getTaskTypeColor(t.assignedType),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
             ),
-          ],
+          ),
           if (t.description.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
@@ -422,7 +454,7 @@ class _CalendarPageState extends State<CalendarPage> {
                         Text('结束日期：${_formatMd(t.endDate)}'),
                         Text('完成进度：${(t.progress * 100).toInt()}%'),
                         Text('状态：${_getStatusText(t.status)}'),
-                        Text('任务类型：${t.taskType}'),
+                        Text('任务类型：${_getTaskTypeDisplayText(t.assignedType)}'),
                         if (t.assigneeName.isNotEmpty) Text('负责人：${t.assigneeName}'),
                         if (t.creatorName.isNotEmpty) Text('创建人：${t.creatorName}'),
                         if (t.description.isNotEmpty) Text('描述：${t.description}'),
@@ -448,6 +480,23 @@ class _CalendarPageState extends State<CalendarPage> {
         ],
       ),
     );
+    if (picked != null) {
+      setState(() {
+        _selectedDate = DateTime(picked.year, picked.month, 1);
+      });
+    }
+  }
+
+  // 获取任务类型描述
+  String _getTaskTypeDescription(String assignedType) {
+    switch (assignedType.toLowerCase()) {
+      case 'personal':
+        return '📋 个人任务';
+      case 'team':
+        return '👥 团队共享任务';
+      default:
+        return '📋 任务';
+    }
   }
 
   // 获取状态颜色
@@ -625,12 +674,20 @@ class _CalendarPageState extends State<CalendarPage> {
       return isTaskInCurrentMonth;
     }).toList();
 
+    // 计算当前月份在甘特图中显示的任务数
+    final currentMonthGanttTasks = _tasks.where((t) {
+      final taskStart = t.startDate.isAfter(firstDay) ? t.startDate : firstDay;
+      final taskEnd = t.endDate.isBefore(lastDay) ? t.endDate : lastDay;
+      return !(taskStart.isAfter(lastDay) || taskEnd.isBefore(firstDay));
+    }).toList();
+
     // 调试信息
     print('📅 当前月份: ${_formatYearMonth(_selectedDate)}');
     print('📋 总任务数: ${_tasks.length}');
     print('📋 当月显示任务数: ${currentMonthTasks.length}');
+    print('📋 甘特图显示任务数: ${currentMonthGanttTasks.length}');
     for (var task in currentMonthTasks) {
-      print('   - ${task.name}: ${_formatMd(task.startDate)} ~ ${_formatMd(task.endDate)}');
+      print('   - ${task.name}: ${_formatMd(task.startDate)} ~ ${_formatMd(task.endDate)} | 类型: ${task.assignedType} | 显示: ${_getTaskTypeDisplayText(task.assignedType)}');
     }
 
     return Container(
@@ -648,8 +705,9 @@ class _CalendarPageState extends State<CalendarPage> {
             children: [
               const Text('任务甘特图', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
               const SizedBox(width: 8),
+              // 修改：显示当前月份在甘特图中的任务数
               Chip(
-                label: Text('${_tasks.length} 个任务'),
+                label: Text('${currentMonthGanttTasks.length} 个任务'),
                 backgroundColor: Colors.blue.shade50,
               ),
             ],
@@ -775,7 +833,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                               Text('结束：${_formatMd(t.endDate)}'),
                                               Text('进度：${(t.progress * 100).toInt()}%'),
                                               Text('状态：${_getStatusText(t.status)}'),
-                                              Text('任务类型：${t.taskType}'),
+                                              Text('任务类型：${_getTaskTypeDisplayText(t.assignedType)}'),
                                               if (t.assigneeName.isNotEmpty) Text('负责人：${t.assigneeName}'),
                                             ],
                                           ),
@@ -926,7 +984,7 @@ class GanttTask {
   final String assigneeName;
   final String creatorName;
   final String description;
-  final String taskType;
+  final String assignedType; // 直接从数据库获取的 assigned_type
 
   GanttTask({
     required this.id,
@@ -940,7 +998,7 @@ class GanttTask {
     required this.assigneeName,
     required this.creatorName,
     required this.description,
-    required this.taskType,
+    required this.assignedType, // 存储原始 assigned_type 值
   });
 }
 
