@@ -480,11 +480,6 @@ class _CalendarPageState extends State<CalendarPage> {
         ],
       ),
     );
-    if (picked != null) {
-      setState(() {
-        _selectedDate = DateTime(picked.year, picked.month, 1);
-      });
-    }
   }
 
   // 获取任务类型描述
