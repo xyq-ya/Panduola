@@ -43,8 +43,5 @@ app.register_blueprint(bp, url_prefix='/api')
 
 
 if __name__ == '__main__':
-    # Flask debug 模式下自动重载会重新读取环境变量——这在开发时通常是期望的
-    # Bind to 0.0.0.0 so the server is reachable from other machines on the LAN
-    # (useful for emulator/device access or when the client targets the host's LAN IP).
-    # If you only want local loopback access, change this back to '127.0.0.1'.
+
     app.run(host='0.0.0.0', port=5000, debug=True)
