@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import '../providers/user_provider.dart';
 
-/// ✅ 日志页面
+/// �?日志页面
 class LogPage extends StatefulWidget {
   const LogPage({super.key});
 
@@ -17,6 +17,8 @@ class _LogPageState extends State<LogPage> {
   int? _roleId;
   String? _departmentName;
   String? _teamName;
+  List<Map<String, dynamic>> _tasks = [];
+  bool _isLoadingTasks = false;
 
   @override
   void initState() {
@@ -24,6 +26,33 @@ class _LogPageState extends State<LogPage> {
     _userId = Provider.of<UserProvider>(context, listen: false).id;
     if (_userId != null) {
       _fetchUserInfo();
+      _fetchTasks();
+    }
+  }
+  
+  Future<void> _fetchTasks() async {
+    if (_userId == null) return;
+    
+    setState(() => _isLoadingTasks = true);
+    
+    try {
+      final response = await http.post(
+        Uri.parse('http://10.0.2.2:5000/api/get_tasks'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({"user_id": _userId}),
+      );
+      
+      final data = jsonDecode(response.body);
+      if (data['code'] == 0 && data['data'] != null) {
+        setState(() {
+          _tasks = List<Map<String, dynamic>>.from(data['data']);
+        });
+        print("加载任务成功: ${_tasks.length} 条");
+      }
+    } catch (e) {
+      debugPrint("加载任务失败: $e");
+    } finally {
+      setState(() => _isLoadingTasks = false);
     }
   }
   
@@ -31,7 +60,7 @@ class _LogPageState extends State<LogPage> {
   Future<void> _fetchUserInfo() async {
   try {
     if (_userId == null) {
-      print("⚠️ _userId为空，无法请求 user_info");
+      print("⚠️ _userId为空，无法请�?user_info");
       return;
     }
 
@@ -41,28 +70,28 @@ class _LogPageState extends State<LogPage> {
       body: jsonEncode({"user_id": _userId}),
     );
 
-    print("📡 user_info 返回状态: ${response.statusCode}");
+    print("📡 user_info 返回状�? ${response.statusCode}");
     print("📡 user_info 返回内容: ${response.body}");
 
     if (response.statusCode != 200) {
-      print("❌ HTTP 状态错误: ${response.statusCode}");
+      print("�?HTTP 状态错�? ${response.statusCode}");
       return;
     }
 
     final decoded = jsonDecode(response.body);
     if (decoded == null || decoded is! Map) {
-      print("❌ 解码失败，返回值不是有效JSON: ${response.body}");
+      print("�?解码失败，返回值不是有效JSON: ${response.body}");
       return;
     }
 
     if (decoded['code'] != 0) {
-      print("❌ 接口错误: ${decoded['msg']}");
+      print("�?接口错误: ${decoded['msg']}");
       return;
     }
 
     final data = decoded['data'];
     if (data == null) {
-      print("❌ data字段为空");
+      print("�?data字段为空");
       return;
     }
 
@@ -72,7 +101,7 @@ class _LogPageState extends State<LogPage> {
       _teamName = data['team'];
     });
 
-    print("✅ 获取用户信息成功: role=$_roleId, 部门=$_departmentName, 团队=$_teamName");
+    print("�?获取用户信息成功: role=$_roleId, 部门=$_departmentName, 团队=$_teamName");
 
   } catch (e, s) {
     print("🔥 _fetchUserInfo 异常: $e");
@@ -148,33 +177,80 @@ class _LogPageState extends State<LogPage> {
         centerTitle: true,
         elevation: 1,
       ),
-      body: ListView(
-        children: [
-          if (_roleId == null)
-            const Center(child: Padding(
-              padding: EdgeInsets.all(20),
-              child: CircularProgressIndicator(),
-            ))
-          else
-            Column(
-              children: [
-                _noteCard("完成任务整理", "已将导图任务节点划分为五个子模块。", "2025-10-05 09:12",
-                    Colors.purpleAccent, "工作"),
-                _noteCard("系统性能优化", "修复了加载缓慢的问题，响应速度提升约30%。",
-                    "2025-10-04 16:45", Colors.orangeAccent, "优化"),
-              ],
-            ),
-        ],
+      body: RefreshIndicator(
+        onRefresh: _fetchTasks,
+        child: ListView(
+          children: [
+            if (_roleId == null || _isLoadingTasks)
+              const Center(child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ))
+            else if (_tasks.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(40),
+                  child: Text(
+                    "暂无任务记录",
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ),
+              )
+            else
+              Column(
+                children: _tasks.map((task) {
+                  // 根据任务状态选择颜色
+                  Color tagColor = Colors.blue;
+                  String tag = "待处理";
+                  if (task['status'] == 'in_progress') {
+                    tagColor = Colors.orange;
+                    tag = "进行中";
+                  } else if (task['status'] == 'completed') {
+                    tagColor = Colors.green;
+                    tag = "已完成";
+                  }
+                  
+                  return _noteCard(
+                    task['title'] ?? '无标题',
+                    task['description'] ?? '无描述',
+                    task['start_time'] ?? '',
+                    tagColor,
+                    tag,
+                  );
+                }).toList(),
+              ),
+          ],
+        ),
       ),
       floatingActionButton: canAddTask
           ? FloatingActionButton(
-              onPressed: () {
-                Navigator.push(
+              onPressed: () async {
+                // 调试：打印从日志页传入的团队名
+                print("[FAB] LogPage _teamName: ${_teamName}");
+                print("[FAB] LogPage _departmentName: ${_departmentName}");
+                // 保护：团队名未就绪时不进入创建页，避免空 team 触发全量返回
+                if (_teamName == null || _teamName!.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("团队信息加载中，请稍后重试")),
+                  );
+                  await _fetchUserInfo();
+                  return;
+                }
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => AddTaskPage(userId: _userId!, roleId: _roleId!),
+                    builder: (context) => AddTaskPage(
+                      userId: _userId!,
+                      roleId: _roleId!,
+                      teamName: _teamName,
+                      departmentName: _departmentName,
+                    ),
                   ),
                 );
+                // 返回后刷新任务列�?                _fetchTasks();
               },
               backgroundColor: Colors.purpleAccent,
               shape: RoundedRectangleBorder(
@@ -190,8 +266,10 @@ class _LogPageState extends State<LogPage> {
 class AddTaskPage extends StatefulWidget {
   final int userId;
   final int roleId;
+  final String? teamName;
+  final String? departmentName;
 
-  const AddTaskPage({super.key, required this.userId, required this.roleId});
+  const AddTaskPage({super.key, required this.userId, required this.roleId, this.teamName, this.departmentName});
 
   @override
   State<AddTaskPage> createState() => _AddTaskPageState();
@@ -205,6 +283,8 @@ class _AddTaskPageState extends State<AddTaskPage> {
   List<Map<String, dynamic>> _departments = [];
   List<Map<String, dynamic>> _teams = [];
   List<Map<String, dynamic>> _users = [];
+  bool _teamsRequested = false; // 防止重复自动拉取
+  bool _isLoadingTeams = false; // 团队列表加载中
 
   List<Map<String, dynamic>> _taskBlocks = [
     {
@@ -248,28 +328,59 @@ class _AddTaskPageState extends State<AddTaskPage> {
 
   Future<void> _fetchTeams() async {
     try {
+      print("[AddTaskPage] departmentName: ${widget.departmentName}");
+      final dept = (widget.departmentName ?? '').trim();
+      print("[AddTaskPage] select_team body: ${jsonEncode({"department": dept})}");
+      if (dept.isEmpty) {
+        print("[AddTaskPage] 部门名为空，跳过拉取团队");
+        debugPrint("[AddTaskPage] 部门名为空，跳过拉取团队");
+        return;
+      }
+      setState(() { _isLoadingTeams = true; });
+      final body = jsonEncode({"department": dept});
+      debugPrint("[AddTaskPage] select_team body: $body");
       final response = await http.post(
         Uri.parse('http://10.0.2.2:5000/api/select_team'),
         headers: {'Content-Type': 'application/json'},
+        body: body,
       );
+      print("[AddTaskPage] select_team status=${response.statusCode}, body=${response.body}");
+      debugPrint("[AddTaskPage] select_team status=${response.statusCode}, body=${response.body}");
       final data = jsonDecode(response.body);
       if (data['code'] == 0) {
         setState(() => _teams = List<Map<String, dynamic>>.from(data['data']));
       }
     } catch (e) {
       debugPrint("加载团队失败: $e");
+    } finally {
+      if (mounted) setState(() { _isLoadingTeams = false; });
     }
   }
 
   Future<void> _fetchUsers() async {
     try {
+      // 调试：打印创建页拿到的团队名
+      print("[AddTaskPage] teamName: ${widget.teamName}");
+      final String teamParam = (widget.teamName ?? '').trim();
+      print("[AddTaskPage] select_user body: ${jsonEncode({"team": teamParam})}");
+      if (teamParam.isEmpty) {
+        print("[AddTaskPage] 队伍名为空，跳过拉取用户");
+        return;
+      }
       final response = await http.post(
         Uri.parse('http://10.0.2.2:5000/api/select_user'),
         headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({"team": teamParam}),
       );
       final data = jsonDecode(response.body);
+      print("[AddTaskPage] select_user status=${response.statusCode}, body=${response.body}");
+      
       if (data['code'] == 0) {
-        setState(() => _users = List<Map<String, dynamic>>.from(data['data']));
+        // 过滤掉当前用户，禁止给自己创建任务
+        final all = List<Map<String, dynamic>>.from(data['data']);
+        final filtered = all.where((u) => (u['id'] as int) != widget.userId).toList();
+        setState(() => _users = filtered);
+        //setState(() => _users = List<Map<String, dynamic>>.from(data['data']));
       }
     } catch (e) {
       debugPrint("加载用户失败: $e");
@@ -328,25 +439,134 @@ class _AddTaskPageState extends State<AddTaskPage> {
       setState(() => _taskBlocks.removeLast());
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("至少保留一个分发对象")),
+        const SnackBar(content: Text("至少保留一个分发对像")),
       );
     }
   }
 
-  void _submitForm() {
-    if (_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("任务已创建")),
-      );
-      Navigator.pop(context);
+  Future<void> _submitForm() async {
+    print("🔵 ====== 开始创建任务 ======");
+    print("🔵 函数被调用，开始表单验证");
+    
+    if (!_formKey.currentState!.validate()) {
+      print("❌ 表单验证失败，无法提交");
+      return;
     }
-  }
+    
+    print("✅ 表单验证通过，准备提交");
+    
+    // 显示加载提示
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      int successCount = 0;
+      int failCount = 0;
+
+      for (var block in _taskBlocks) {
+        final String title = (block['title'] as TextEditingController).text.trim();
+        final String desc = (block['desc'] as TextEditingController).text.trim();
+
+        print("📝 处理任务块: title='$title', desc='$desc'");
+        if (title.isEmpty) {
+          print("⚠️ 跳过空标题的任务块");
+          failCount++;
+          continue;
+        }
+
+        String assignedType = 'personal';
+        int assignedId = 0;
+
+        if (widget.roleId == 1 || widget.roleId == 2) {
+          if (block['department'] != null) {
+            assignedType = 'dept';
+            final dept = _departments.firstWhere((d) => d['dept_name'] == block['department']);
+            assignedId = dept['id'] as int;
+          }
+        } else if (widget.roleId == 3) {
+          if (block['team'] != null) {
+            assignedType = 'team';
+            final team = _teams.firstWhere((t) => t['team_name'] == block['team']);
+            assignedId = team['id'] as int;
+          }
+        } else if (widget.roleId == 4) {
+          if (block['user'] != null) {
+            assignedType = 'personal';
+            final user = _users.firstWhere((u) => u['username'] == block['user']);
+            assignedId = user['id'] as int;
+          }
+        }
+
+        if (assignedId == 0) {
+          assignedType = 'personal';
+          assignedId = widget.userId;
+        }
+
+        final response = await http.post(
+          Uri.parse('http://10.0.2.2:5000/api/create_task'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'title': title,
+            'description': desc,
+            'creator_id': widget.userId,
+            'assigned_type': assignedType,
+            'assigned_id': assignedId,
+            'start_time': _startTime.toIso8601String(),
+            'end_time': _endTime.toIso8601String(),
+          }),
+        );
+
+        print("📥 收到响应: status=${response.statusCode}, body=${response.body}");
+        if (response.statusCode != 200) {
+          print("❌ HTTP错误: status=${response.statusCode}");
+          failCount++;
+          continue;
+        }
+
+        final result = jsonDecode(response.body);
+        if (result['code'] != 0) {
+          print("❌ 创建任务失败: ${result['msg']}");
+          failCount++;
+          continue;
+        }
+
+        print("✅ 任务创建成功: id=${result['data']?['task_id']}");
+        successCount++;
+      }
+
+      if (!mounted) return;
+      Navigator.pop(context); // 关闭加载提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(successCount > 0 ? "任务已创建" : "创建失败")),
+      );
+      Navigator.pop(context); // 返回上一页
+    } catch (e) {
+      debugPrint("提交任务异常: $e");
+      if (!mounted) return;
+      Navigator.pop(context); // 关闭加载提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("创建任务失败: $e")),
+      );
+    }
+    }
 
   @override
   Widget build(BuildContext context) {
     final isCompany = widget.roleId == 1 || widget.roleId == 2;
     final isDepartment = widget.roleId == 3;
     final isTeam = widget.roleId == 4;
+
+    // 若为部门角色且团队尚未加载，但部门名已可用，则自动触发一次加载
+    if (isDepartment && _teams.isEmpty && !_teamsRequested && ((widget.departmentName ?? '').trim().isNotEmpty)) {
+      _teamsRequested = true;
+      Future.microtask(_fetchTeams);
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -363,10 +583,10 @@ class _AddTaskPageState extends State<AddTaskPage> {
               child: TextFormField(
                 controller: _totalTitleController,
                 decoration: const InputDecoration(
-                  labelText: "总任务标题",
+                  labelText: "总任务标",
                   border: InputBorder.none,
                 ),
-                validator: (v) => v == null || v.isEmpty ? "请输入总任务标题" : null,
+                validator: (v) => v == null || v.isEmpty ? "请输入总任务标": null,
               ),
             ),
             _buildCard(
@@ -374,7 +594,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
                 controller: _totalDescController,
                 maxLines: 3,
                 decoration: const InputDecoration(
-                  labelText: "总任务描述",
+                  labelText: "总任务描",
                   border: InputBorder.none,
                 ),
               ),
@@ -395,7 +615,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
                         labelText: "任务标题",
                         border: InputBorder.none,
                       ),
-                      validator: (v) => v == null || v.isEmpty ? "请输入任务标题" : null,
+                      validator: (v) => v == null || v.isEmpty ? "请输入任务标" : null,
                     ),
                   ),
                   if (isCompany)
@@ -411,13 +631,16 @@ class _AddTaskPageState extends State<AddTaskPage> {
                                     ))
                             .toList(),
                         onChanged: (v) => setState(() => block['department'] = v),
+                        validator: (v) => v == null || v.isEmpty ? "请选择部门" : null,
                       ),
                     ),
                   if (isDepartment)
-                    _buildCard(
+                      _buildCard(
                       child: DropdownButtonFormField<String>(
                         value: block['team'] as String?,
-                        hint: const Text("选择团队"),
+                        hint: Text(_isLoadingTeams
+                            ? "团队加载中..."
+                            : (_teams.isEmpty ? "暂无团队" : "选择团队")),
                         items: _teams
                             .map<DropdownMenuItem<String>>(
                                 (t) => DropdownMenuItem<String>(
@@ -425,7 +648,10 @@ class _AddTaskPageState extends State<AddTaskPage> {
                                       child: Text(t['team_name'] as String),
                                     ))
                             .toList(),
-                        onChanged: (v) => setState(() => block['team'] = v),
+                        onChanged: (_isLoadingTeams || _teams.isEmpty)
+                            ? null
+                            : (v) => setState(() => block['team'] = v),
+                        validator: (v) => v == null || v.isEmpty ? "请选择团队" : null,
                       ),
                     ),
                   if (isTeam)
@@ -441,6 +667,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
                                     ))
                             .toList(),
                         onChanged: (v) => setState(() => block['user'] = v),
+                        validator: (v) => v == null || v.isEmpty ? "请选择员工" : null,
                       ),
                     ),
                   _buildCard(
@@ -495,13 +722,31 @@ class _AddTaskPageState extends State<AddTaskPage> {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _submitForm,
+              onPressed: () {
+                // 测试：立即显示 SnackBar 和打印日志
+                print("🟢 ====== 按钮被点击了！======");
+                print("🟢 准备调用 _submitForm() 函数");
+                
+                // 显示 SnackBar 确认按钮被点击
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('🟢 按钮被点击了！正在提交表单...'),
+                    duration: Duration(seconds: 2),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+                
+                // 延迟一点再调用，确保 SnackBar 显示
+                Future.delayed(const Duration(milliseconds: 100), () {
+                  _submitForm();
+                });
+              },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.lightBlue[200],
+                backgroundColor: Colors.red, // 改为红色，更容易看到变化
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              child: const Text("创建任务", style: TextStyle(fontSize: 16)),
+              child: const Text("创建任务", style: TextStyle(fontSize: 16, color: Colors.white)),
             ),
           ],
         ),

@@ -405,3 +405,105 @@ def _get_task_color(status, progress):
             return '#FFC107'  # 黄色 - 刚开始
     else:  # pending
         return '#9E9E9E'  # 灰色 - 未开始
+# -------------------- 创建任务 --------------------
+@bp.route('/create_task', methods=['POST'])
+def create_task():
+    try:
+        data = request.get_json() or {}
+        title = data.get('title')
+        description = data.get('description', '')
+        creator_id = data.get('creator_id')
+        assigned_type = data.get('assigned_type', 'personal')
+        assigned_id = data.get('assigned_id')
+        if not assigned_id:
+            assigned_type = 'personal'
+            assigned_id = creator_id
+
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+
+        if not title or not creator_id or not start_time or not end_time or not assigned_type:
+            return jsonify({"code": 1, "msg": "缺少必要字段"})
+        
+        if assigned_type == 'personal' and assigned_id == creator_id:
+            return jsonify({"code": 1, "msg": "不能给自己创建任务"})
+
+        # 每次请求创建新的连接
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO biz_task 
+                       (title, description, creator_id, assigned_type, assigned_id, start_time, end_time, status, progress)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', 0)""",
+                    (title, description, creator_id, assigned_type, assigned_id, start_time, end_time)
+                )
+                task_id = cursor.lastrowid
+            conn.commit()
+        
+        print(f"✅ create_task 成功: id={task_id}, title={title}")
+        return jsonify({"code": 0, "msg": "任务创建成功", "data": {"task_id": task_id}})
+
+    except Exception as e:
+        print("create_task 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
+
+# -------------------- 获取任务列表 --------------------
+@bp.route('/get_tasks', methods=['POST'])
+def get_tasks():
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 先取当前用户的 team_id 与 department_id
+                cursor.execute("SELECT team_id FROM sys_user WHERE id=%s", (user_id,))
+                row = cursor.fetchone()
+                team_id = row[0] if row else None
+                dept_id = None
+                if team_id:
+                    cursor.execute("SELECT department_id FROM sys_team WHERE id=%s", (team_id,))
+                    r2 = cursor.fetchone()
+                    dept_id = r2[0] if r2 else None
+
+                # 查询任务
+                cursor.execute(
+                    """
+                    SELECT t.id, t.title, t.description, t.start_time, t.end_time,
+                           t.status, t.progress, t.assigned_type, t.assigned_id,
+                           u.name as creator_name
+                    FROM biz_task t
+                    LEFT JOIN sys_user u ON t.creator_id = u.id
+                    WHERE t.creator_id = %s
+                       OR (t.assigned_type = 'personal' AND t.assigned_id = %s)
+                       OR (%s IS NOT NULL AND t.assigned_type = 'team' AND t.assigned_id = %s)
+                       OR (%s IS NOT NULL AND t.assigned_type = 'dept' AND t.assigned_id = %s)
+                    ORDER BY t.create_time DESC
+                    LIMIT 50
+                    """,
+                    (user_id, user_id, team_id, team_id, dept_id, dept_id),
+                )
+                tasks = cursor.fetchall()
+
+        task_list = []
+        for task in tasks:
+            task_list.append({
+                "id": task[0],
+                "title": task[1],
+                "description": task[2],
+                "start_time": task[3].strftime('%Y-%m-%d %H:%M:%S') if task[3] else '',
+                "end_time": task[4].strftime('%Y-%m-%d %H:%M:%S') if task[4] else '',
+                "status": task[5],
+                "progress": task[6],
+                "assigned_type": task[7],
+                "assigned_id": task[8],
+                "creator_name": task[9],
+            })
+
+        return jsonify({"code": 0, "data": task_list})
+
+    except Exception as e:
+        print("get_tasks 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
