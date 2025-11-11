@@ -207,7 +207,7 @@ def user_info():
         return jsonify({"code": 500, "msg": "服务器内部错误"})
 
 
-# -------------------- AI 分析（外部或 Mock） --------------------
+# -------------------- AI 分析 --------------------
 @bp.route('/ai_analyze', methods=['POST'])
 def ai_analyze():
     data = request.get_json() or {}
@@ -219,29 +219,7 @@ def ai_analyze():
     if not text and not data.get('messages'):
         return jsonify({"code": 1, "msg": "缺少 text 或 messages 字段"}), 400
 
-
-    # 也就是说只要配置了 ARK_API_KEY（或 AI_API_URL），将尝试调用外部 AI
-    if current_app.config.get('MOCK_DB') or (not current_app.config.get('AI_API_URL') and not current_app.config.get('ARK_API_KEY')):
-        # 简单关键词频率统计作为示例分析输出
-        words = {}
-        for w in __import__('re').findall(r"[\u4e00-\u9fa5_a-zA-Z0-9]+", text):
-            w = w.lower()
-            if len(w) > 1:
-                words[w] = words.get(w, 0) + 1
-
-        # 构造简单建议（与客户端本地逻辑一致的简易版）
-        high = [k for k, v in words.items() if v >= 2]
-        lines = []
-        if any('会议' in h or '沟通' in h for h in high):
-            lines.append('行为特征：偏向协作与沟通。建议：减少会议时长并明确议程。')
-        if any('文档' in h or '设计' in h or '调研' in h for h in high):
-            lines.append('行为特征：偏向独立执行与研究。建议：安排更多同步时间以便让产出落地。')
-        if not lines:
-            lines.append('行为特征：均衡。建议：保持当前工作方式并关注关键阻塞项。')
-
-        return jsonify({"code": 0, "data": {"analysis": '\n'.join(lines), "keywords": words}})
-
-    # 否则尝试调用外部 AI 服务
+    # 尝试调用外部 AI 服务
     try:
         # Use absolute import because Flask app is run as a script in development
         from ai_client import analyze_text
@@ -274,65 +252,75 @@ def stats_dashboard():
         conn = current_app.db_conn
         cur = conn.cursor()
 
+        # 计算日期范围
+        from datetime import datetime, timedelta
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=days-1)
+
         # 近 N 天日志用于关键词统计与趋势
         cur.execute(
             """
             SELECT log_date, keywords, content
             FROM biz_work_log
-            WHERE user_id=%s AND log_date >= (CURDATE() - INTERVAL %s DAY)
+            WHERE user_id=%s AND log_date BETWEEN %s AND %s
             ORDER BY log_date ASC
             """,
-            (user_id, max(days-1, 0))
+            (user_id, start_date, end_date)
         )
         rows = cur.fetchall()
 
-        # 同期与用户相关的事务（任务）：标题与描述纳入关键词统计
+        # 同期与用户相关的事务（任务）
         cur.execute(
             """
             SELECT title, description
             FROM biz_task
             WHERE (creator_id=%s OR assigned_id=%s)
-              AND (DATE(update_time) >= (CURDATE() - INTERVAL %s DAY))
+              AND DATE(update_time) BETWEEN %s AND %s
             ORDER BY update_time DESC
             """,
-            (user_id, user_id, max(days-1, 0))
+            (user_id, user_id, start_date, end_date)
         )
         task_rows = cur.fetchall()
 
-        # 1) 关键词聚合：合并日志 keywords/content 与 任务 title/description
+        print(f"查询到 {len(rows)} 条日志, {len(task_rows)} 条任务")  # 调试日志
+
+        # 1) 关键词聚合
         import re
         word_freq = {}
+        
         def add_text_to_freq(text_str: str):
-            for w in re.findall(r"[\u4e00-\u9fa5_a-zA-Z0-9]+", text_str or ''):
+            if not text_str:
+                return
+            stop_words = {'的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个'}
+            
+            for w in re.findall(r"[\u4e00-\u9fa5_a-zA-Z0-9]+", text_str):
                 w = w.strip().lower()
-                if len(w) <= 1:
+                if len(w) <= 1 or w in stop_words:
                     continue
                 word_freq[w] = word_freq.get(w, 0) + 1
 
         for (log_date, kw, content) in rows:
-            add_text_to_freq((kw or ''))
-            add_text_to_freq((content or ''))
+            add_text_to_freq(kw or '')
+            add_text_to_freq(content or '')
 
         for (title, desc) in task_rows:
-            add_text_to_freq((title or ''))
-            add_text_to_freq((desc or ''))
+            add_text_to_freq(title or '')
+            add_text_to_freq(desc or '')
 
-        # 2) 趋势（按天统计日志条数）
+        # 2) 趋势数据
         trend_map = {}
         for (log_date, kw, content) in rows:
             k = log_date.strftime('%Y-%m-%d') if hasattr(log_date, 'strftime') else str(log_date)
             trend_map[k] = trend_map.get(k, 0) + 1
 
-        # 填充缺失天为 0，保证前端连续性
-        from datetime import date, timedelta
-        today = date.today()
+        # 填充连续日期
         ordered = []
         for i in range(days):
-            d = today - timedelta(days=(days-1-i))
+            d = end_date - timedelta(days=(days-1-i))
             s = d.strftime('%Y-%m-%d')
             ordered.append({"date": s, "count": int(trend_map.get(s, 0))})
 
-        # 3) 任务分类占比（基于关键词粗分类）
+        # 3) 任务分类占比
         category_map = {
             '沟通类': ['会议','沟通','同步','讨论','评审','对接'],
             '执行类': ['开发','实现','修复','测试','部署','上线','优化','重构'],
@@ -340,10 +328,13 @@ def stats_dashboard():
             '异常处理类': ['异常','故障','告警','回滚','应急','bug']
         }
         category_count = {k: 0 for k in category_map.keys()}
+        
         for w, c in word_freq.items():
+            matched = False
             for cat, kws in category_map.items():
-                if any(kw.lower() in w for kw in kws):
+                if any(kw in w for kw in kws):
                     category_count[cat] += c
+                    matched = True
                     break
 
         cur.close()
@@ -357,4 +348,340 @@ def stats_dashboard():
         })
     except Exception as e:
         print('stats_dashboard 异常:', e)
+        return jsonify({"code": 500, "msg": "服务器内部错误", "detail": str(e)}), 500
+    
+    
+# -------------------- 公司十大事项（公司层面主事项） --------------------
+@bp.route('/company_top_matters', methods=['GET'])
+def company_top_matters():
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        # 取公司层面主事项：由角色 1 或 2 创建，且为顶层任务
+        cursor.execute(
+            """
+            SELECT t.id, t.title
+            FROM biz_task t
+            JOIN sys_user u ON t.creator_id = u.id
+            WHERE u.role_id IN (1, 2) AND t.parent_id IS NULL
+            ORDER BY t.update_time DESC, t.create_time DESC
+            LIMIT 10
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [{"id": r[0], "title": r[1]} for r in rows]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("company_top_matters 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+
+# -------------------- 公司十大派发任务（由高权限派发） --------------------
+@bp.route('/company_dispatched_tasks', methods=['GET'])
+def company_dispatched_tasks():
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT t.id, t.title, t.status, t.progress
+            FROM biz_task t
+            JOIN sys_user u ON t.creator_id = u.id
+            WHERE u.role_id BETWEEN 1 AND 2
+            ORDER BY t.update_time DESC, t.create_time DESC
+            LIMIT 10
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [
+            {"id": r[0], "title": r[1], "status": r[2], "progress": r[3]} for r in rows
+        ]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("company_dispatched_tasks 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+
+# -------------------- 个人十大展示项（分配给个人的任务） --------------------
+@bp.route('/personal_top_items', methods=['POST'])
+def personal_top_items():
+    try:
+        body = request.get_json() or {}
+        user_id = body.get('user_id')
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        # 个人被分配的任务（assigned_id = user_id）
+        cursor.execute(
+            """
+            SELECT id, title, status, end_time
+            FROM biz_task
+            WHERE assigned_id = %s
+            ORDER BY update_time DESC, create_time DESC
+            LIMIT 10
+            """,
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [
+            {"id": r[0], "title": r[1], "status": r[2], "end_time": r[3].strftime('%Y-%m-%d') if r[3] else None}
+            for r in rows
+        ]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("personal_top_items 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+
+# -------------------- 个人日志（最近10条） --------------------
+@bp.route('/personal_logs', methods=['POST'])
+def personal_logs():
+    try:
+        body = request.get_json() or {}
+        user_id = body.get('user_id')
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT wl.id, u.name, wl.content, wl.log_date
+            FROM biz_work_log wl
+            JOIN sys_user u ON wl.user_id = u.id
+            WHERE wl.user_id = %s
+            ORDER BY wl.log_date DESC, wl.create_time DESC
+            LIMIT 10
+            """,
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        data = [
+            {"id": r[0], "username": r[1], "content": r[2], "date": r[3].strftime('%Y-%m-%d')}
+            for r in rows
+        ]
+        return jsonify({"code": 0, "data": data})
+    except Exception as e:
+        print("personal_logs 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+# -------------------- 获取用户任务数据（用于甘特图） --------------------
+@bp.route('/get_user_tasks', methods=['POST'])
+def get_user_tasks():
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+
+    if not user_id:
+        return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+
+        # 1. 获取用户所在的团队ID
+        cursor.execute("SELECT team_id FROM sys_user WHERE id=%s", (user_id,))
+        user_info = cursor.fetchone()
+
+        if not user_info:
+            cursor.close()
+            return jsonify({"code": 2, "msg": "用户信息不存在"})
+
+        user_team_id = user_info[0]
+
+        print(f"🔍 调试信息: user_id={user_id}, user_team_id={user_team_id}")
+        print(f"🔍 查询条件: assigned_id={user_team_id} OR creator_id={user_id}")
+
+        # 2. 先测试简单的查询，确保能查到数据
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_id = %s", (user_team_id,))
+        assigned_count = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE creator_id = %s", (user_id,))
+        creator_count = cursor.fetchone()[0]
+
+        print(f"🔍 分配给团队 {user_team_id} 的任务数: {assigned_count}")
+        print(f"🔍 用户 {user_id} 创建的任务数: {creator_count}")
+
+        # 3. 执行主查询
+        cursor.execute("""
+            SELECT
+                t.id, t.title, t.description, t.start_time, t.end_time,
+                t.progress, t.status, t.creator_id, t.assigned_id,
+                u.name as assignee_name,
+                creator.name as creator_name
+            FROM biz_task t
+            LEFT JOIN sys_user u ON t.assigned_id = u.id
+            LEFT JOIN sys_user creator ON t.creator_id = creator.id
+            WHERE t.assigned_id = %s OR t.creator_id = %s
+            ORDER BY t.start_time
+        """, (user_team_id, user_id))
+
+        tasks = cursor.fetchall()
+
+        print(f"🔍 查询结果: 找到 {len(tasks)} 个任务")
+        for task in tasks:
+            print(f"📋 任务: id={task[0]}, title='{task[1]}', assigned_id={task[8]}, creator_id={task[7]}")
+
+        cursor.close()
+
+        task_list = []
+        for task in tasks:
+            color = _get_task_color(task[6], task[5])
+
+            # 判断任务类型
+            task_type = "个人任务" if task[7] == user_id else "团队任务"
+
+            task_list.append({
+                "id": task[0],
+                "name": task[1],
+                "description": task[2],
+                "start_date": task[3].strftime('%Y-%m-%d') if task[3] else None,
+                "end_date": task[4].strftime('%Y-%m-%d') if task[4] else None,
+                "progress": float(task[5]) / 100.0 if task[5] is not None else 0.0,
+                "status": task[6],
+                "creator_id": task[7],
+                "assigned_id": task[8],
+                "assignee_name": task[9],
+                "creator_name": task[10],
+                "color": color,
+                "is_milestone": False,
+                "task_type": task_type
+            })
+
+        return jsonify({
+            "code": 0,
+            "data": task_list,
+            "count": len(task_list),
+            "debug_info": {
+                "user_id": user_id,
+                "user_team_id": user_team_id,
+                "assigned_task_count": assigned_count,
+                "created_task_count": creator_count,
+                "final_task_count": len(task_list)
+            }
+        })
+
+    except Exception as e:
+        print("获取任务数据异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+def _get_task_color(status, progress):
+    """根据任务状态和进度确定颜色"""
+    if status == 'completed':
+        return '#4CAF50'  # 绿色 - 已完成
+    elif status == 'in_progress':
+        if progress >= 80:
+            return '#2196F3'  # 蓝色 - 接近完成
+        elif progress >= 50:
+            return '#FF9800'  # 橙色 - 进行中
+        else:
+            return '#FFC107'  # 黄色 - 刚开始
+    else:  # pending
+        return '#9E9E9E'  # 灰色 - 未开始
+# -------------------- 创建任务 --------------------
+@bp.route('/create_task', methods=['POST'])
+def create_task():
+    try:
+        data = request.get_json() or {}
+        title = data.get('title')
+        description = data.get('description', '')
+        creator_id = data.get('creator_id')
+        assigned_type = data.get('assigned_type', 'personal')
+        assigned_id = data.get('assigned_id')
+        if not assigned_id:
+            assigned_type = 'personal'
+            assigned_id = creator_id
+
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+
+        if not title or not creator_id or not start_time or not end_time or not assigned_type:
+            return jsonify({"code": 1, "msg": "缺少必要字段"})
+        
+        if assigned_type == 'personal' and assigned_id == creator_id:
+            return jsonify({"code": 1, "msg": "不能给自己创建任务"})
+
+        # 每次请求创建新的连接
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO biz_task 
+                       (title, description, creator_id, assigned_type, assigned_id, start_time, end_time, status, progress)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', 0)""",
+                    (title, description, creator_id, assigned_type, assigned_id, start_time, end_time)
+                )
+                task_id = cursor.lastrowid
+            conn.commit()
+        
+        print(f"✅ create_task 成功: id={task_id}, title={title}")
+        return jsonify({"code": 0, "msg": "任务创建成功", "data": {"task_id": task_id}})
+
+    except Exception as e:
+        print("create_task 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
+
+# -------------------- 获取任务列表 --------------------
+@bp.route('/get_tasks', methods=['POST'])
+def get_tasks():
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 先取当前用户的 team_id 与 department_id
+                cursor.execute("SELECT team_id FROM sys_user WHERE id=%s", (user_id,))
+                row = cursor.fetchone()
+                team_id = row[0] if row else None
+                dept_id = None
+                if team_id:
+                    cursor.execute("SELECT department_id FROM sys_team WHERE id=%s", (team_id,))
+                    r2 = cursor.fetchone()
+                    dept_id = r2[0] if r2 else None
+
+                # 查询任务
+                cursor.execute(
+                    """
+                    SELECT t.id, t.title, t.description, t.start_time, t.end_time,
+                           t.status, t.progress, t.assigned_type, t.assigned_id,
+                           u.name as creator_name
+                    FROM biz_task t
+                    LEFT JOIN sys_user u ON t.creator_id = u.id
+                    WHERE t.creator_id = %s
+                       OR (t.assigned_type = 'personal' AND t.assigned_id = %s)
+                       OR (%s IS NOT NULL AND t.assigned_type = 'team' AND t.assigned_id = %s)
+                       OR (%s IS NOT NULL AND t.assigned_type = 'dept' AND t.assigned_id = %s)
+                    ORDER BY t.create_time DESC
+                    LIMIT 50
+                    """,
+                    (user_id, user_id, team_id, team_id, dept_id, dept_id),
+                )
+                tasks = cursor.fetchall()
+
+        task_list = []
+        for task in tasks:
+            task_list.append({
+                "id": task[0],
+                "title": task[1],
+                "description": task[2],
+                "start_time": task[3].strftime('%Y-%m-%d %H:%M:%S') if task[3] else '',
+                "end_time": task[4].strftime('%Y-%m-%d %H:%M:%S') if task[4] else '',
+                "status": task[5],
+                "progress": task[6],
+                "assigned_type": task[7],
+                "assigned_id": task[8],
+                "creator_name": task[9],
+            })
+
+        return jsonify({"code": 0, "data": task_list})
+
+    except Exception as e:
+        print("get_tasks 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})

@@ -6,7 +6,7 @@ class DataService {
   static Future<Map<String, dynamic>> getDashboardStats(int userId, {int days = 7}) async {
     try {
       // 直接硬编码完整URL
-      const String requestUrl = 'http://192.168.10.37:5000/api/stats_dashboard';
+      const String requestUrl = 'http://localhost:5000/api/stats_dashboard';
       
       print('🚀 === 开始API请求 ===');
       print('🎯 目标URL: $requestUrl');
