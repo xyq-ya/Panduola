@@ -3,8 +3,6 @@ from flask import Blueprint, request, jsonify, current_app
 
 bp = Blueprint('auth', __name__)
 
-
-
 # -------------------- 登录 --------------------
 @bp.route('/login', methods=['POST'])
 def login():
@@ -14,8 +12,6 @@ def login():
 
     if not username or not password:
         return jsonify({"error": "用户名或密码不能为空"}), 400
-
-
 
     try:
         conn = current_app.db_conn
@@ -42,9 +38,6 @@ def login():
 @bp.route('/select_department', methods=['POST'])
 def select_department():
     try:
-        if current_app.config.get('MOCK_DB'):
-            return jsonify(mock_select_department())
-
         conn = current_app.db_conn
         cursor = conn.cursor()
         cursor.execute("SELECT id, dept_name FROM sys_department")
@@ -66,9 +59,6 @@ def select_team():
         dept_name = data.get("department")
         if not dept_name:
             return jsonify({"code": 1, "msg": "缺少部门名"})
-
-        if current_app.config.get('MOCK_DB'):
-            return jsonify(mock_select_team(dept_name))
 
         conn = current_app.db_conn
         cursor = conn.cursor()
@@ -99,9 +89,6 @@ def select_user():
         if not team_name:
             return jsonify({"code": 1, "msg": "缺少团队名"})
 
-        if current_app.config.get('MOCK_DB'):
-            return jsonify(mock_select_user(team_name))
-
         conn = current_app.db_conn
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM sys_team WHERE team_name=%s", (team_name,))
@@ -129,9 +116,6 @@ def user_info():
     user_id = data.get("user_id")
     if not user_id:
         return jsonify({"code": 1, "msg": "缺少用户ID"})
-
-    if current_app.config.get('MOCK_DB'):
-        return jsonify(mock_user_info(user_id))
 
     try:
         conn = current_app.db_conn
