@@ -29,16 +29,6 @@ def init_db_connection():
     return conn
 
 
-# 在 app 上挂载全局连接
-try:
-    app.db_conn = init_db_connection()
-    print('DB connection established')
-except Exception as e:
-    # 连接失败时抛出异常
-    print('无法建立数据库连接: ', e)
-    raise e
-
-
 # 注册蓝图
 app.register_blueprint(bp, url_prefix='/api')
 
