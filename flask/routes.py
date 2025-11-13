@@ -3,23 +3,7 @@ from flask import Blueprint, request, jsonify, current_app
 
 bp = Blueprint('auth', __name__)
 
-def mock_login_response(username):
-    # 返回与真实接口相同字段的示例
-    if username == 'admin':
-        return {'id': 1}
-    return {'id': 100}
 
-def mock_select_department():
-    return {"code": 0, "data": [{"id": 1, "dept_name": "技术部"}, {"id": 2, "dept_name": "市场部"}]}
-
-def mock_select_team(department):
-    return {"code": 0, "data": [{"id": 1, "team_name": "前端开发团队"}, {"id": 2, "team_name": "后端开发团队"}]}
-
-def mock_select_user(team):
-    return {"code": 0, "data": [{"id": 1, "username": "张三"}, {"id": 2, "username": "李四"}]}
-
-def mock_user_info(user_id):
-    return {"code": 0, "data": {"username": "张三", "role_id": 5, "role_name": "普通员工", "department": "技术部", "team": "前端开发团队"}}
 
 # -------------------- 登录 --------------------
 @bp.route('/login', methods=['POST'])
@@ -31,9 +15,7 @@ def login():
     if not username or not password:
         return jsonify({"error": "用户名或密码不能为空"}), 400
 
-    # mock 模式下返回示例数据（无需数据库）
-    if current_app.config.get('MOCK_DB'):
-        return jsonify(mock_login_response(username))
+
 
     try:
         conn = current_app.db_conn
