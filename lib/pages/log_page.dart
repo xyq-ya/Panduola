@@ -67,7 +67,7 @@ class _LogPageState extends State<LogPage> {
     }
 
     final response = await http.post(
-  Uri.parse('${Api.baseUrl()}/api/user_info'),
+      Uri.parse('http://10.0.2.2:5000/api/user_info'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({"user_id": _userId}),
     );
@@ -325,7 +325,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
   Future<void> _fetchDepartments() async {
     try {
       final response = await http.post(
-  Uri.parse('${Api.baseUrl()}/api/select_department'),
+        Uri.parse('http://10.0.2.2:5000/api/select_department'),
         headers: {'Content-Type': 'application/json'},
       );
       final data = jsonDecode(response.body);
@@ -351,7 +351,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
       final body = jsonEncode({"department": dept});
       debugPrint("[AddTaskPage] select_team body: $body");
       final response = await http.post(
-  Uri.parse('${Api.baseUrl()}/api/select_team'),
+        Uri.parse('http://10.0.2.2:5000/api/select_team'),
         headers: {'Content-Type': 'application/json'},
         body: body,
       );
@@ -379,7 +379,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
         return;
       }
       final response = await http.post(
-  Uri.parse('${Api.baseUrl()}/api/select_user'),
+        Uri.parse('http://10.0.2.2:5000/api/select_user'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({"team": teamParam}),
       );

@@ -27,7 +27,7 @@ class PandoraApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF0F2F5),
         fontFamily: 'Nunito',
       ),
-
+      home: const LoginPage(),
     );
   }
 }

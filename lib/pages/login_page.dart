@@ -33,7 +33,7 @@ class _LoginPageState extends State<LoginPage> {
 
   try {
     // 使用 Android 模拟器访问本地 Flask 服务
-  final url = Uri.parse('${Api.baseUrl()}/api/login');
+  final url = Uri.parse('http://10.0.2.2:5000/api/login');
 
     final response = await http.post(
       url,
