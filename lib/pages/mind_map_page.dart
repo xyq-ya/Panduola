@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../utils/api.dart';
 
 class MindMapPage extends StatefulWidget {
   const MindMapPage({super.key});
