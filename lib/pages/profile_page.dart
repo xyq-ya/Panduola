@@ -35,8 +35,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _fetchUserInfo(int userId) async {
     try {
+      final apiUrl = UserProvider.getApiUrl('user_info');
       final res = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/user_info'),
+        Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': userId}),
       );

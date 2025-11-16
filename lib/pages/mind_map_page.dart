@@ -15,6 +15,7 @@ class MindMapPage extends StatefulWidget {
 class _MindMapPageState extends State<MindMapPage> {
   int? _userId;
   int? _roleId;
+  int? _targetUserId;
   String? selectedDepartment;
   String? selectedTeam;
   String? selectedEmployee;
@@ -37,6 +38,7 @@ class _MindMapPageState extends State<MindMapPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final userProvider = Provider.of<UserProvider>(context, listen: false);
       _userId = userProvider.id;
+      _targetUserId = _userId;
       _initUserInfo();
     });
   }
@@ -45,8 +47,9 @@ class _MindMapPageState extends State<MindMapPage> {
     if (_userId == null) return;
 
     try {
+      final apiUrl = UserProvider.getApiUrl('user_info');
       final res = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/user_info'),
+        Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': _userId}),
       );
@@ -81,8 +84,9 @@ class _MindMapPageState extends State<MindMapPage> {
     try {
       // 部门
       if (_roleId! <= 2) {
+        final apiUrl = UserProvider.getApiUrl('select_department');
         final res = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/select_department'),
+          Uri.parse(apiUrl),
           headers: {'Content-Type': 'application/json'},
         );
         final deptData = jsonDecode(res.body)['data'] as List;
@@ -94,8 +98,9 @@ class _MindMapPageState extends State<MindMapPage> {
       // 团队
       if (_roleId! <= 2 || _roleId! == 3) {
         if (selectedDepartment != null) {
+          final apiUrl = UserProvider.getApiUrl('select_team');
           final res = await http.post(
-            Uri.parse('http://10.0.2.2:5000/api/select_team'),
+            Uri.parse(apiUrl),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'department': selectedDepartment}),
           );
@@ -108,8 +113,9 @@ class _MindMapPageState extends State<MindMapPage> {
 
       // 员工
       if (_roleId! <= 4 && selectedTeam != null) {
+        final apiUrl = UserProvider.getApiUrl('select_user');
         final res = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/select_user'),
+          Uri.parse(apiUrl),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'team': selectedTeam}),
         );
@@ -132,7 +138,8 @@ class _MindMapPageState extends State<MindMapPage> {
   Future<void> _loadMindMapData() async {
     try {
       // 公司十大事项
-      final resMatters = await http.get(Uri.parse('http://10.0.2.2:5000/api/company_top_matters'));
+      var apiUrl = UserProvider.getApiUrl('company_top_matters');
+      final resMatters = await http.get(Uri.parse(apiUrl));
       if (resMatters.statusCode == 200) {
         final body = jsonDecode(resMatters.body);
         if (body['code'] == 0) {
@@ -142,7 +149,8 @@ class _MindMapPageState extends State<MindMapPage> {
       }
 
       // 公司十大派发任务
-      final resDispatched = await http.get(Uri.parse('http://10.0.2.2:5000/api/company_dispatched_tasks'));
+      apiUrl = UserProvider.getApiUrl('company_dispatched_tasks');
+      final resDispatched = await http.get(Uri.parse(apiUrl));
       if (resDispatched.statusCode == 200) {
         final body = jsonDecode(resDispatched.body);
         if (body['code'] == 0) {
@@ -151,11 +159,12 @@ class _MindMapPageState extends State<MindMapPage> {
       }
 
       // 个人十大展示项
+      apiUrl = UserProvider.getApiUrl('personal_top_items');
       if (_userId != null) {
         final resPersonal = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/personal_top_items'),
+          Uri.parse(apiUrl),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'user_id': _userId}),
+          body: jsonEncode({'user_id': _targetUserId}),
         );
         if (resPersonal.statusCode == 200) {
           final body = jsonDecode(resPersonal.body);
@@ -165,10 +174,11 @@ class _MindMapPageState extends State<MindMapPage> {
         }
 
         // 个人日志
+        apiUrl = UserProvider.getApiUrl('personal_logs');
         final resLogs = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/personal_logs'),
+          Uri.parse(apiUrl),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'user_id': _userId}),
+          body: jsonEncode({'user_id': _targetUserId}),
         );
         if (resLogs.statusCode == 200) {
           final body = jsonDecode(resLogs.body);
@@ -185,7 +195,37 @@ class _MindMapPageState extends State<MindMapPage> {
       });
     }
   }
+  Future<void> _getUserIdByName(String username) async {
+    try {
+      final apiUrl = UserProvider.getApiUrl('get_user_id_by_name');
+      final res = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'username': username}),
+      );
 
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['code'] == 0) {
+          final data = body['data'];
+          setState(() {
+            _targetUserId = data['id'];
+            // 如果需要，也可以更新团队/角色
+            _roleId = data['role_id'];
+            selectedEmployee = data['name'];
+          });
+          print('现在观察: $_targetUserId');
+          await _loadMindMapData();
+        } else {
+          print('用户不存在: ${body['msg']}');
+        }
+      } else {
+        print('接口请求失败: ${res.statusCode}');
+      }
+    } catch (e) {
+      print('获取用户ID错误: $e');
+    }
+  }
   // 权限判断
   bool get canSelectDepartment => _roleId != null && _roleId! <= 2;
   bool get canSelectTeam => _roleId != null && (_roleId! <= 3 || _roleId! == 4);
@@ -265,12 +305,15 @@ class _MindMapPageState extends State<MindMapPage> {
                   label: '部门',
                   value: selectedDepartment,
                   items: departments,
-                  onChanged: (v) => setState(() {
-                    selectedDepartment = v;
-                    selectedTeam = null;
-                    selectedEmployee = null;
+                  onChanged: (v) {
+                    setState(() {
+                      selectedDepartment = v;
+                      selectedTeam = null;
+                      selectedEmployee = null;
+                    });
+
                     _loadDropdowns();
-                  }),
+                  },
                   enabled: canSelectDepartment,
                 ),
               ),
@@ -280,11 +323,14 @@ class _MindMapPageState extends State<MindMapPage> {
                   label: '团队',
                   value: selectedTeam,
                   items: teams,
-                  onChanged: (v) => setState(() {
-                    selectedTeam = v;
-                    selectedEmployee = null;
+                  onChanged: (v) {
+                    setState(() {
+                      selectedTeam = v;
+                      selectedEmployee = null;
+                    });
+
                     _loadDropdowns();
-                  }),
+                  },
                   enabled: canSelectTeam,
                 ),
               ),
@@ -294,7 +340,14 @@ class _MindMapPageState extends State<MindMapPage> {
                   label: '员工',
                   value: selectedEmployee,
                   items: employees,
-                  onChanged: (v) => setState(() => selectedEmployee = v),
+                  onChanged: (v) async {  // ✅ async
+                    if (v != null) {
+                      setState(() {
+                        selectedEmployee = v;
+                      });
+                      await _getUserIdByName(v);  // 调接口获取用户 ID
+                    }
+                  },
                   enabled: canSelectEmployee,
                 ),
               ),

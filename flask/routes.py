@@ -3,22 +3,30 @@ from flask import Blueprint, request, jsonify, current_app
 
 bp = Blueprint('auth', __name__)
 
+def get_db_connection():
+    """获取数据库连接"""
+    return current_app.create_db_connection()
+
 # -------------------- 登录 --------------------
 @bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
     password = data.get('password')
-    username = data.get('username')  # 虽然 Flutter 不用，但保留接口验证
+    username = data.get('username')
 
     if not username or not password:
         return jsonify({"error": "用户名或密码不能为空"}), 400
 
     try:
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "数据库连接失败"}), 500
+            
         cursor = conn.cursor()
         cursor.execute("SELECT id, password FROM sys_user WHERE username=%s", (username,))
         result = cursor.fetchone()
         cursor.close()
+        conn.close()
 
         if not result:
             return jsonify({"error": "用户不存在"}), 401
@@ -38,13 +46,17 @@ def login():
 @bp.route('/select_department', methods=['POST'])
 def select_department():
     try:
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
         cursor.execute("SELECT id, dept_name FROM sys_department")
         result = cursor.fetchall()
         cursor.close()
+        conn.close()
 
-        dept_list = [{"id": r[0], "dept_name": r[1]} for r in result]  # ⚠ 返回 dept_name
+        dept_list = [{"id": r[0], "dept_name": r[1]} for r in result]
         return jsonify({"code": 0, "data": dept_list})
 
     except Exception as e:
@@ -60,20 +72,25 @@ def select_team():
         if not dept_name:
             return jsonify({"code": 1, "msg": "缺少部门名"})
 
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM sys_department WHERE dept_name=%s", (dept_name,))
         dept = cursor.fetchone()
         if not dept:
             cursor.close()
+            conn.close()
             return jsonify({"code": 2, "msg": "部门不存在"})
 
         dept_id = dept[0]
         cursor.execute("SELECT id, team_name FROM sys_team WHERE department_id=%s", (dept_id,))
         teams = cursor.fetchall()
         cursor.close()
+        conn.close()
 
-        team_list = [{"id": t[0], "team_name": t[1]} for t in teams]  # ⚠ 返回 team_name
+        team_list = [{"id": t[0], "team_name": t[1]} for t in teams]
         return jsonify({"code": 0, "data": team_list})
 
     except Exception as e:
@@ -89,20 +106,25 @@ def select_user():
         if not team_name:
             return jsonify({"code": 1, "msg": "缺少团队名"})
 
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM sys_team WHERE team_name=%s", (team_name,))
         team = cursor.fetchone()
         if not team:
             cursor.close()
+            conn.close()
             return jsonify({"code": 2, "msg": "团队不存在"})
 
         team_id = team[0]
         cursor.execute("SELECT id, name FROM sys_user WHERE team_id=%s", (team_id,))
         users = cursor.fetchall()
         cursor.close()
+        conn.close()
 
-        user_list = [{"id": u[0], "username": u[1]} for u in users]  # ⚠ 返回 username
+        user_list = [{"id": u[0], "username": u[1]} for u in users]
         return jsonify({"code": 0, "data": user_list})
 
     except Exception as e:
@@ -118,12 +140,16 @@ def user_info():
         return jsonify({"code": 1, "msg": "缺少用户ID"})
 
     try:
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
         cursor.execute("SELECT name, role_id, team_id FROM sys_user WHERE id=%s", (user_id,))
         user = cursor.fetchone()
         if not user:
             cursor.close()
+            conn.close()
             return jsonify({"code": 2, "msg": "用户不存在"})
 
         name, role_id, team_id = user
@@ -149,6 +175,8 @@ def user_info():
                     dept_name = dept[0] if dept else None
 
         cursor.close()
+        conn.close()
+        
         print("user_info 返回:", {
             "username": name,
             "role_id": role_id,
@@ -160,7 +188,7 @@ def user_info():
         return jsonify({
             "code": 0,
             "data": {
-                "username": name,      # ⚠ Flutter 这里用 selectedEmployee
+                "username": name,
                 "role_id": role_id,
                 "role_name": role_name,
                 "department": dept_name,
@@ -171,7 +199,100 @@ def user_info():
     except Exception as e:
         print("user_info 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
-    
+
+# -------------------- 创建任务 --------------------
+@bp.route('/create_task', methods=['POST'])
+def create_task():
+    try:
+        data = request.get_json() or {}
+        title = data.get('title', '').strip()
+        description = data.get('description', '').strip()
+        creator_id = data.get('creator_id')
+        assigned_type = data.get('assigned_type', 'personal')
+        assigned_id = data.get('assigned_id', creator_id)
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+
+        # 验证字段
+        if not title or not creator_id or not start_time or not end_time:
+            return jsonify({"code": 1, "msg": "缺少必要字段"})
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO biz_task 
+               (title, description, creator_id, assigned_type, assigned_id, start_time, end_time, status, progress)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', 0)""",
+            (title, description, creator_id, assigned_type, assigned_id, start_time, end_time)
+        )
+        task_id = cursor.lastrowid
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print(f"✅ create_task 成功: id={task_id}, title={title}")
+        return jsonify({"code": 0, "msg": "任务创建成功", "data": {"task_id": task_id}})
+
+    except Exception as e:
+        print("create_task 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
+
+# -------------------- 获取任务列表 --------------------
+@bp.route('/get_tasks', methods=['POST'])
+def get_tasks():
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """
+            SELECT t.id, t.title, t.description, t.start_time, t.end_time,
+                   t.status, t.progress, t.assigned_type, t.assigned_id,
+                   u.name as creator_name
+            FROM biz_task t
+            LEFT JOIN sys_user u ON t.creator_id = u.id
+            WHERE t.creator_id = %s OR t.assigned_id = %s
+            ORDER BY t.create_time DESC
+            LIMIT 50
+            """,
+            (user_id, user_id)
+        )
+        tasks = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        task_list = []
+        for task in tasks:
+            task_list.append({
+                "id": task[0],
+                "title": task[1] or '',
+                "description": task[2] or '',
+                "start_time": task[3].strftime('%Y-%m-%d %H:%M:%S') if task[3] else '',
+                "end_time": task[4].strftime('%Y-%m-%d %H:%M:%S') if task[4] else '',
+                "status": task[5] or 'pending',
+                "progress": task[6] or 0,
+                "assigned_type": task[7] or 'personal',
+                "assigned_id": task[8] or user_id,
+                "creator_name": task[9] or '',
+            })
+
+        return jsonify({"code": 0, "data": task_list})
+
+    except Exception as e:
+        print("get_tasks 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
+# routes.py - 继续修改剩余的路由
 
 # -------------------- AI 分析 --------------------
 @bp.route('/ai_analyze', methods=['POST'])
@@ -181,29 +302,20 @@ def ai_analyze():
     model = data.get('model')
     messages = data.get('messages')
 
-    # Accept either a plain `text` string or a `messages` list for multi-turn conversation
     if not text and not data.get('messages'):
         return jsonify({"code": 1, "msg": "缺少 text 或 messages 字段"}), 400
 
-    # 尝试调用外部 AI 服务
     try:
-        # Use absolute import because Flask app is run as a script in development
         from ai_client import analyze_text
-        # If the client sent a messages array (multi-turn), pass it through; otherwise pass text
         result = analyze_text(text=text, model=model, messages=messages)
-        # 如果外部返回 error，转换为 500
         if isinstance(result, dict) and result.get('error'):
             return jsonify({"code": 502, "msg": "外部 AI 调用失败", "detail": str(result.get('error'))}), 502
-        # 规范化返回：如果 result 包含 'analysis'，将其包在 data.analysis
         if isinstance(result, dict) and 'analysis' in result:
             return jsonify({"code": 0, "data": {"analysis": result['analysis'], **({k:v for k,v in result.items() if k!='analysis'})}})
-        # 否则直接尝试透传
         return jsonify({"code": 0, "data": result})
     except Exception as e:
-        # 返回详细错误以便本地调试（生产环境请移除 detail）
         print('ai_analyze 异常:', e)
         return jsonify({"code": 500, "msg": "服务器内部错误", "detail": str(e)}), 500
-    
 
 # -------------------- 数据统计：关键词云 & 趋势 --------------------
 @bp.route('/stats_dashboard', methods=['POST'])
@@ -215,7 +327,10 @@ def stats_dashboard():
         if not user_id:
             return jsonify({"code": 400, "msg": "缺少 user_id"}), 400
 
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cur = conn.cursor()
 
         # 计算日期范围
@@ -248,7 +363,7 @@ def stats_dashboard():
         )
         task_rows = cur.fetchall()
 
-        print(f"查询到 {len(rows)} 条日志, {len(task_rows)} 条任务")  # 调试日志
+        print(f"查询到 {len(rows)} 条日志, {len(task_rows)} 条任务")
 
         # 1) 关键词聚合
         import re
@@ -304,6 +419,8 @@ def stats_dashboard():
                     break
 
         cur.close()
+        conn.close()
+        
         return jsonify({
             "code": 0,
             "data": {
@@ -315,15 +432,16 @@ def stats_dashboard():
     except Exception as e:
         print('stats_dashboard 异常:', e)
         return jsonify({"code": 500, "msg": "服务器内部错误", "detail": str(e)}), 500
-    
-    
+
 # -------------------- 公司十大事项（公司层面主事项） --------------------
 @bp.route('/company_top_matters', methods=['GET'])
 def company_top_matters():
     try:
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
-        # 取公司层面主事项：由角色 1 或 2 创建，且为顶层任务
         cursor.execute(
             """
             SELECT t.id, t.title
@@ -336,18 +454,22 @@ def company_top_matters():
         )
         rows = cursor.fetchall()
         cursor.close()
+        conn.close()
+        
         data = [{"id": r[0], "title": r[1]} for r in rows]
         return jsonify({"code": 0, "data": data})
     except Exception as e:
         print("company_top_matters 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
 
-
 # -------------------- 公司十大派发任务（由高权限派发） --------------------
 @bp.route('/company_dispatched_tasks', methods=['GET'])
 def company_dispatched_tasks():
     try:
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -361,6 +483,8 @@ def company_dispatched_tasks():
         )
         rows = cursor.fetchall()
         cursor.close()
+        conn.close()
+        
         data = [
             {"id": r[0], "title": r[1], "status": r[2], "progress": r[3]} for r in rows
         ]
@@ -368,7 +492,6 @@ def company_dispatched_tasks():
     except Exception as e:
         print("company_dispatched_tasks 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
-
 
 # -------------------- 个人十大展示项（分配给个人的任务） --------------------
 @bp.route('/personal_top_items', methods=['POST'])
@@ -379,9 +502,11 @@ def personal_top_items():
         if not user_id:
             return jsonify({"code": 1, "msg": "缺少用户ID"})
 
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
-        # 个人被分配的任务（assigned_id = user_id）
         cursor.execute(
             """
             SELECT id, title, status, end_time
@@ -394,6 +519,8 @@ def personal_top_items():
         )
         rows = cursor.fetchall()
         cursor.close()
+        conn.close()
+        
         data = [
             {"id": r[0], "title": r[1], "status": r[2], "end_time": r[3].strftime('%Y-%m-%d') if r[3] else None}
             for r in rows
@@ -402,7 +529,6 @@ def personal_top_items():
     except Exception as e:
         print("personal_top_items 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
-
 
 # -------------------- 个人日志（最近10条） --------------------
 @bp.route('/personal_logs', methods=['POST'])
@@ -413,7 +539,10 @@ def personal_logs():
         if not user_id:
             return jsonify({"code": 1, "msg": "缺少用户ID"})
 
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -428,6 +557,8 @@ def personal_logs():
         )
         rows = cursor.fetchall()
         cursor.close()
+        conn.close()
+        
         data = [
             {"id": r[0], "username": r[1], "content": r[2], "date": r[3].strftime('%Y-%m-%d')}
             for r in rows
@@ -447,7 +578,10 @@ def get_user_tasks():
         return jsonify({"code": 1, "msg": "缺少用户ID"})
 
     try:
-        conn = current_app.db_conn
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
         cursor = conn.cursor()
 
         # 1. 获取用户所在的团队ID
@@ -456,12 +590,12 @@ def get_user_tasks():
 
         if not user_info:
             cursor.close()
+            conn.close()
             return jsonify({"code": 2, "msg": "用户信息不存在"})
 
         user_team_id = user_info[0]
 
         print(f"🔍 调试信息: user_id={user_id}, user_team_id={user_team_id}")
-        print(f"🔍 查询条件: assigned_id={user_team_id} OR creator_id={user_id}")
 
         # 2. 先测试简单的查询，确保能查到数据
         cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_id = %s", (user_team_id,))
@@ -494,6 +628,7 @@ def get_user_tasks():
             print(f"📋 任务: id={task[0]}, title='{task[1]}', assigned_id={task[8]}, creator_id={task[7]}")
 
         cursor.close()
+        conn.close()
 
         task_list = []
         for task in tasks:
@@ -535,7 +670,40 @@ def get_user_tasks():
     except Exception as e:
         print("获取任务数据异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
+@bp.route('/get_user_id_by_name', methods=['POST'])
+def get_user_id_by_name():
+    data = request.get_json()
+    name = data.get("username")   # 前端传的是 username，但其实是 “姓名”
 
+    if not name:
+        return jsonify({"code": 1, "msg": "缺少参数 username（实际是姓名）"}), 400
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, team_id, role_id FROM sys_user WHERE name=%s", (name,))
+        user = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not user:
+            return jsonify({"code": 1, "msg": f"用户 '{name}' 不存在"})
+
+        return jsonify({
+            "code": 0,
+            "data": {
+                "id": user[0],
+                "name": user[1],
+                "team_id": user[2],
+                "role_id": user[3]
+            }
+        })
+    except Exception as e:
+        print("get_user_id_by_name 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
 def _get_task_color(status, progress):
     """根据任务状态和进度确定颜色"""
     if status == 'completed':
@@ -549,105 +717,3 @@ def _get_task_color(status, progress):
             return '#FFC107'  # 黄色 - 刚开始
     else:  # pending
         return '#9E9E9E'  # 灰色 - 未开始
-# -------------------- 创建任务 --------------------
-@bp.route('/create_task', methods=['POST'])
-def create_task():
-    try:
-        data = request.get_json() or {}
-        title = data.get('title')
-        description = data.get('description', '')
-        creator_id = data.get('creator_id')
-        assigned_type = data.get('assigned_type', 'personal')
-        assigned_id = data.get('assigned_id')
-        if not assigned_id:
-            assigned_type = 'personal'
-            assigned_id = creator_id
-
-        start_time = data.get('start_time')
-        end_time = data.get('end_time')
-
-        if not title or not creator_id or not start_time or not end_time or not assigned_type:
-            return jsonify({"code": 1, "msg": "缺少必要字段"})
-        
-        if assigned_type == 'personal' and assigned_id == creator_id:
-            return jsonify({"code": 1, "msg": "不能给自己创建任务"})
-
-        # 每次请求创建新的连接
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """INSERT INTO biz_task 
-                       (title, description, creator_id, assigned_type, assigned_id, start_time, end_time, status, progress)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', 0)""",
-                    (title, description, creator_id, assigned_type, assigned_id, start_time, end_time)
-                )
-                task_id = cursor.lastrowid
-            conn.commit()
-        
-        print(f"✅ create_task 成功: id={task_id}, title={title}")
-        return jsonify({"code": 0, "msg": "任务创建成功", "data": {"task_id": task_id}})
-
-    except Exception as e:
-        print("create_task 异常:", e)
-        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
-
-# -------------------- 获取任务列表 --------------------
-@bp.route('/get_tasks', methods=['POST'])
-def get_tasks():
-    try:
-        data = request.get_json() or {}
-        user_id = data.get('user_id')
-        if not user_id:
-            return jsonify({"code": 1, "msg": "缺少用户ID"})
-
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                # 先取当前用户的 team_id 与 department_id
-                cursor.execute("SELECT team_id FROM sys_user WHERE id=%s", (user_id,))
-                row = cursor.fetchone()
-                team_id = row[0] if row else None
-                dept_id = None
-                if team_id:
-                    cursor.execute("SELECT department_id FROM sys_team WHERE id=%s", (team_id,))
-                    r2 = cursor.fetchone()
-                    dept_id = r2[0] if r2 else None
-
-                # 查询任务
-                cursor.execute(
-                    """
-                    SELECT t.id, t.title, t.description, t.start_time, t.end_time,
-                           t.status, t.progress, t.assigned_type, t.assigned_id,
-                           u.name as creator_name
-                    FROM biz_task t
-                    LEFT JOIN sys_user u ON t.creator_id = u.id
-                    WHERE t.creator_id = %s
-                       OR (t.assigned_type = 'personal' AND t.assigned_id = %s)
-                       OR (%s IS NOT NULL AND t.assigned_type = 'team' AND t.assigned_id = %s)
-                       OR (%s IS NOT NULL AND t.assigned_type = 'dept' AND t.assigned_id = %s)
-                    ORDER BY t.create_time DESC
-                    LIMIT 50
-                    """,
-                    (user_id, user_id, team_id, team_id, dept_id, dept_id),
-                )
-                tasks = cursor.fetchall()
-
-        task_list = []
-        for task in tasks:
-            task_list.append({
-                "id": task[0],
-                "title": task[1],
-                "description": task[2],
-                "start_time": task[3].strftime('%Y-%m-%d %H:%M:%S') if task[3] else '',
-                "end_time": task[4].strftime('%Y-%m-%d %H:%M:%S') if task[4] else '',
-                "status": task[5],
-                "progress": task[6],
-                "assigned_type": task[7],
-                "assigned_id": task[8],
-                "creator_name": task[9],
-            })
-
-        return jsonify({"code": 0, "data": task_list})
-
-    except Exception as e:
-        print("get_tasks 异常:", e)
-        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})

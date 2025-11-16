@@ -38,8 +38,9 @@ class _LogPageState extends State<LogPage> {
     setState(() => _isLoadingTasks = true);
     
     try {
+      final apiUrl = UserProvider.getApiUrl('get_tasks');
       final response = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/get_tasks'),
+        Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({"user_id": _userId}),
       );
@@ -65,9 +66,9 @@ class _LogPageState extends State<LogPage> {
       print("⚠️ _userId为空，无法请�?user_info");
       return;
     }
-
+    final apiUrl = UserProvider.getApiUrl('user_info');
     final response = await http.post(
-      Uri.parse('http://10.0.2.2:5000/api/user_info'),
+      Uri.parse(apiUrl),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({"user_id": _userId}),
     );
@@ -261,7 +262,10 @@ class _LogPageState extends State<LogPage> {
                     ),
                   ),
                 );
-                // 返回后刷新任务列�?                _fetchTasks();
+                await _fetchTasks(); // 刷新任务列表
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("任务列表已更新")),
+                );
               },
               backgroundColor: Colors.purpleAccent,
               shape: RoundedRectangleBorder(
@@ -324,8 +328,9 @@ class _AddTaskPageState extends State<AddTaskPage> {
 
   Future<void> _fetchDepartments() async {
     try {
+      final apiUrl = UserProvider.getApiUrl('select_department');
       final response = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/select_department'),
+        Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
       );
       final data = jsonDecode(response.body);
@@ -350,8 +355,9 @@ class _AddTaskPageState extends State<AddTaskPage> {
       setState(() { _isLoadingTeams = true; });
       final body = jsonEncode({"department": dept});
       debugPrint("[AddTaskPage] select_team body: $body");
+      final apiUrl = UserProvider.getApiUrl('select_team');
       final response = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/select_team'),
+        Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
         body: body,
       );
@@ -378,8 +384,9 @@ class _AddTaskPageState extends State<AddTaskPage> {
         print("[AddTaskPage] 队伍名为空，跳过拉取用户");
         return;
       }
+      final apiUrl = UserProvider.getApiUrl('select_user');
       final response = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/select_user'),
+        Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({"team": teamParam}),
       );
@@ -518,9 +525,9 @@ class _AddTaskPageState extends State<AddTaskPage> {
           assignedType = 'personal';
           assignedId = widget.userId;
         }
-
+        final apiUrl = UserProvider.getApiUrl('create_task');
         final response = await http.post(
-          Uri.parse('http://10.0.2.2:5000/api/create_task'),
+          Uri.parse(apiUrl),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
             'title': title,
@@ -734,26 +741,10 @@ class _AddTaskPageState extends State<AddTaskPage> {
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
-                // 测试：立即显示 SnackBar 和打印日志
-                print("🟢 ====== 按钮被点击了！======");
-                print("🟢 准备调用 _submitForm() 函数");
-                
-                // 显示 SnackBar 确认按钮被点击
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('🟢 按钮被点击了！正在提交表单...'),
-                    duration: Duration(seconds: 2),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-                
-                // 延迟一点再调用，确保 SnackBar 显示
-                Future.delayed(const Duration(milliseconds: 100), () {
-                  _submitForm();
-                });
+                _submitForm();
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red, // 改为红色，更容易看到变化
+                backgroundColor: Colors.red,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),

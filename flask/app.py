@@ -6,40 +6,36 @@ import config
 import pymysql
 import os
 
-
 app = Flask(__name__)
-CORS(app)  # 允许 Flutter 跨域
+CORS(app)
 
-# 将后端配置注入到 app.config，方便各个模块统一读取（优先使用 config.py，再回退到环境变量）
 app.config['ARK_API_KEY'] = getattr(config, 'ARK_API_KEY', None)
 app.config['ARK_BASE_URL'] = getattr(config, 'ARK_BASE_URL', None)
 app.config['AI_API_URL'] = getattr(config, 'AI_API_URL', None) or os.getenv('AI_API_URL')
 app.config['AI_API_KEY'] = getattr(config, 'AI_API_KEY', None) or os.getenv('AI_API_KEY')
 
-# === 建立全局长期数据库连接 ===
-def init_db_connection():
-    conn = pymysql.connect(
-        host=config.DB_HOST,
-        user=config.DB_USER,
-        password=config.DB_PASSWORD,
-        database=config.DB_NAME,
-        charset=config.DB_CHARSET,
-        autocommit=True
-    )
-    return conn
+# 不再创建全局连接，改为在需要时创建
+def create_db_connection():
+    """创建新的数据库连接"""
+    try:
+        conn = pymysql.connect(
+            host=config.DB_HOST,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset=config.DB_CHARSET,
+            autocommit=True
+        )
+        return conn
+    except Exception as e:
+        print(f"创建数据库连接失败: {e}")
+        return None
 
-# 在 app 上挂载全局连接
-try:
-    app.db_conn = init_db_connection()
-    print('DB connection established')
-except Exception as e:
-    # 连接失败时抛出异常
-    print('无法建立数据库连接: ', e)
-    raise e
+# 将连接创建函数挂载到 app 上
+app.create_db_connection = create_db_connection
 
 # 注册蓝图
 app.register_blueprint(bp, url_prefix='/api')
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

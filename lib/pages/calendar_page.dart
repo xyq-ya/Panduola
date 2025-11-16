@@ -33,8 +33,9 @@ class _CalendarPageState extends State<CalendarPage> {
     }
 
     try {
+      final apiUrl = UserProvider.getApiUrl('get_user_tasks');
       final response = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/get_user_tasks'),
+        Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': _userId}),
       );
@@ -84,7 +85,6 @@ class _CalendarPageState extends State<CalendarPage> {
             }).toList();
             _isLoading = false;
           });
-
           // 添加处理后的任务数据调试
           print('=== 处理后的任务数据 ===');
           for (var i = 0; i < _tasks.length; i++) {
@@ -617,8 +617,10 @@ class _CalendarPageState extends State<CalendarPage> {
       }
     }
 
-    return Stack(
-      children: emptyIndicators,
+    return SizedBox(
+      width: totalDays * cellWidth,
+      height: 34, // 与甘特图行高一致
+      child: Stack(children: emptyIndicators),
     );
   }
 

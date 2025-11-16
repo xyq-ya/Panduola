@@ -33,7 +33,8 @@ class _LoginPageState extends State<LoginPage> {
 
   try {
     // 使用 Android 模拟器访问本地 Flask 服务
-  final url = Uri.parse('http://10.0.2.2:5000/api/login');
+  final apiUrl = UserProvider.getApiUrl('login');
+  final url = Uri.parse(apiUrl);
 
     final response = await http.post(
       url,
@@ -150,7 +151,7 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
 
-            // 登录表单区域
+            // 登录表单区域 - 修改这部分
             Expanded(
               flex: 3,
               child: Container(
@@ -162,7 +163,7 @@ class _LoginPageState extends State<LoginPage> {
                     topRight: Radius.circular(30),
                   ),
                 ),
-                child: Padding(
+                child: SingleChildScrollView(  // 添加这行
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Column(
                     children: [
@@ -268,7 +269,6 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           GestureDetector(
                             onTap: () {
-                              // 忘记密码功能
                               _showErrorDialog('忘记密码功能开发中...');
                             },
                             child: const Text(
@@ -317,7 +317,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
 
-                      const Spacer(),
                       const SizedBox(height: 20),
 
                       // 版本信息
