@@ -1,5 +1,17 @@
 # routes.py
 from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app
+from decimal import Decimal
+import json
+
+bp = Blueprint('auth', __name__)
+
+class DecimalEncoder(json.JSONEncoder):
+    """自定义 JSON 编码器处理 Decimal 类型"""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 bp = Blueprint('auth', __name__)
 
@@ -284,3 +296,262 @@ def _get_task_color(status, progress):
             return '#FFC107'  # 黄色 - 刚开始
     else:  # pending
         return '#9E9E9E'  # 灰色 - 未开始
+
+# -------------------- 获取团队成员信息 --------------------
+@bp.route('/get_team_members', methods=['POST'])
+def get_team_members():
+    data = request.get_json() or {}
+    team_id = data.get('team_id')
+    current_user_id = data.get('current_user_id')
+
+    if not team_id:
+        return jsonify({"code": 1, "msg": "团队ID不能为空"})
+
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+
+        # 查询团队成员信息
+        cursor.execute("""
+            SELECT u.id, u.username, u.name, u.email, u.mobile, r.role_name
+            FROM sys_user u
+            LEFT JOIN sys_role r ON u.role_id = r.id
+            WHERE u.team_id = %s
+            ORDER BY
+                CASE r.role_name
+                    WHEN '部门老总' THEN 1
+                    WHEN '管理员' THEN 2
+                    WHEN '部门经理' THEN 3
+                    WHEN '团队队长' THEN 4
+                    ELSE 5
+                END,
+                u.id
+        """, (team_id,))
+
+        members = cursor.fetchall()
+        cursor.close()
+
+        members_data = []
+        for member in members:
+            members_data.append({
+                "id": member[0],
+                "username": member[1],
+                "name": member[2],
+                "email": member[3],
+                "mobile": member[4],
+                "role_name": member[5]
+            })
+
+        print(f"获取团队成员: team_id={team_id}, 成员数量={len(members_data)}")
+        return jsonify({
+            "code": 0,
+            "data": members_data
+        })
+
+    except Exception as e:
+        print("获取团队成员异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+# -------------------- 获取用户任务统计数据 --------------------
+@bp.route('/get_user_stats', methods=['POST'])
+def get_user_stats():
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+
+    if not user_id:
+        return jsonify({"code": 1, "msg": "用户ID不能为空"})
+
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+
+        print(f"🔍 开始统计用户 {user_id} 的任务数据")
+
+        # 1. 首先验证用户是否存在
+        cursor.execute("SELECT id, team_id FROM sys_user WHERE id=%s", (user_id,))
+        user_info = cursor.fetchone()
+
+        if not user_info:
+            cursor.close()
+            print(f"❌ 用户 {user_id} 不存在")
+            return jsonify({"code": 2, "msg": "用户信息不存在"})
+
+        user_team_id = user_info[1]
+        print(f"✅ 用户存在: user_id={user_id}, team_id={user_team_id}")
+
+        # 2. 分别查询各种状态的任务数量（使用简单查询避免复杂逻辑）
+        # 总任务数：用户创建的任务 + 分配给用户团队的任务
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM biz_task
+            WHERE assigned_id = %s OR creator_id = %s
+        """, (user_team_id, user_id))
+        total_tasks_result = cursor.fetchone()
+        total_tasks = int(total_tasks_result[0]) if total_tasks_result and total_tasks_result[0] is not None else 0
+
+        # 已完成任务数 (progress = 100)
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM biz_task
+            WHERE (assigned_id = %s OR creator_id = %s) AND progress = 100
+        """, (user_team_id, user_id))
+        completed_tasks_result = cursor.fetchone()
+        completed_tasks = int(completed_tasks_result[0]) if completed_tasks_result and completed_tasks_result[0] is not None else 0
+
+        # 进行中任务数 (0 < progress < 100)
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM biz_task
+            WHERE (assigned_id = %s OR creator_id = %s) AND progress > 0 AND progress < 100
+        """, (user_team_id, user_id))
+        in_progress_tasks_result = cursor.fetchone()
+        in_progress_tasks = int(in_progress_tasks_result[0]) if in_progress_tasks_result and in_progress_tasks_result[0] is not None else 0
+
+        # 待开始任务数 (progress = 0 或 NULL)
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM biz_task
+            WHERE (assigned_id = %s OR creator_id = %s) AND (progress = 0 OR progress IS NULL)
+        """, (user_team_id, user_id))
+        pending_tasks_result = cursor.fetchone()
+        pending_tasks = int(pending_tasks_result[0]) if pending_tasks_result and pending_tasks_result[0] is not None else 0
+
+        cursor.close()
+
+        # 3. 计算完成率（确保使用 float 类型）
+        completion_rate = 0.0
+        if total_tasks > 0:
+            completion_rate = round((completed_tasks / total_tasks) * 100, 1)
+
+        print(f"📊 用户统计详情:")
+        print(f"   - 总任务数: {total_tasks} (类型: {type(total_tasks)})")
+        print(f"   - 已完成: {completed_tasks} (类型: {type(completed_tasks)})")
+        print(f"   - 进行中: {in_progress_tasks} (类型: {type(in_progress_tasks)})")
+        print(f"   - 待开始: {pending_tasks} (类型: {type(pending_tasks)})")
+        print(f"   - 完成率: {completion_rate}% (类型: {type(completion_rate)})")
+
+        # 4. 构建响应数据（确保所有数字都是基本类型）
+        response_data = {
+            "code": 0,
+            "data": {
+                "total_tasks": total_tasks,
+                "completed_tasks": completed_tasks,
+                "in_progress_tasks": in_progress_tasks,
+                "pending_tasks": pending_tasks,
+                "completion_rate": completion_rate
+            }
+        }
+
+        # 5. 手动验证数据可序列化
+        try:
+            # 测试数据是否可以 JSON 序列化
+            json.dumps(response_data)
+            print("✅ 响应数据可以正常序列化")
+        except Exception as json_error:
+            print(f"❌ JSON 序列化错误: {json_error}")
+            # 如果序列化失败，返回安全的数据
+            return jsonify({
+                "code": 0,
+                "data": {
+                    "total_tasks": 0,
+                    "completed_tasks": 0,
+                    "in_progress_tasks": 0,
+                    "pending_tasks": 0,
+                    "completion_rate": 0.0
+                }
+            })
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        print("❌ 获取用户统计数据异常:", str(e))
+        import traceback
+        print("详细错误信息:")
+        traceback.print_exc()
+
+        # 返回安全的默认数据
+        return jsonify({
+            "code": 0,
+            "data": {
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "in_progress_tasks": 0,
+                "pending_tasks": 0,
+                "completion_rate": 0.0
+            },
+            "msg": "使用默认数据"
+        })
+
+# -------------------- 备用统计方案：只查询个人任务 --------------------
+@bp.route('/get_personal_stats', methods=['POST'])
+def get_personal_stats():
+    """只查询个人任务的统计数据（更简单可靠）"""
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+
+    if not user_id:
+        return jsonify({"code": 1, "msg": "用户ID不能为空"})
+
+    try:
+        conn = current_app.db_conn
+        cursor = conn.cursor()
+
+        print(f"🔍 开始统计用户 {user_id} 的个人任务数据")
+
+        # 只查询分配给该用户的任务（assigned_id = user_id）
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_id = %s", (user_id,))
+        total_tasks_result = cursor.fetchone()
+        total_tasks = int(total_tasks_result[0]) if total_tasks_result else 0
+
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_id = %s AND progress = 100", (user_id,))
+        completed_tasks_result = cursor.fetchone()
+        completed_tasks = int(completed_tasks_result[0]) if completed_tasks_result else 0
+
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_id = %s AND progress > 0 AND progress < 100", (user_id,))
+        in_progress_tasks_result = cursor.fetchone()
+        in_progress_tasks = int(in_progress_tasks_result[0]) if in_progress_tasks_result else 0
+
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_id = %s AND (progress = 0 OR progress IS NULL)", (user_id,))
+        pending_tasks_result = cursor.fetchone()
+        pending_tasks = int(pending_tasks_result[0]) if pending_tasks_result else 0
+
+        cursor.close()
+
+        # 计算完成率
+        completion_rate = 0.0
+        if total_tasks > 0:
+            completion_rate = round((completed_tasks / total_tasks) * 100, 1)
+
+        print(f"📊 个人任务统计:")
+        print(f"   - 总任务数: {total_tasks}")
+        print(f"   - 已完成: {completed_tasks}")
+        print(f"   - 进行中: {in_progress_tasks}")
+        print(f"   - 待开始: {pending_tasks}")
+        print(f"   - 完成率: {completion_rate}%")
+
+        return jsonify({
+            "code": 0,
+            "data": {
+                "total_tasks": total_tasks,
+                "completed_tasks": completed_tasks,
+                "in_progress_tasks": in_progress_tasks,
+                "pending_tasks": pending_tasks,
+                "completion_rate": completion_rate
+            }
+        })
+
+    except Exception as e:
+        print("❌ 获取个人统计数据异常:", str(e))
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "code": 0,
+            "data": {
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "in_progress_tasks": 0,
+                "pending_tasks": 0,
+                "completion_rate": 0.0
+            }
+        })
