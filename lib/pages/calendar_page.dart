@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'task_detail_page.dart';
 import '../providers/user_provider.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -437,35 +438,11 @@ class _CalendarPageState extends State<CalendarPage> {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    title: Text(t.name,
-                        style: TextStyle(
-                            color: t.color, fontWeight: FontWeight.bold)),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('开始日期：${_formatMd(t.startDate)}'),
-                        Text('结束日期：${_formatMd(t.endDate)}'),
-                        Text('完成进度：${(t.progress * 100).toInt()}%'),
-                        Text('状态：${_getStatusText(t.status)}'),
-                        Text('任务类型：${_getTaskTypeDisplayText(t.assignedType)}'),
-                        if (t.assigneeName.isNotEmpty) Text('负责人：${t.assigneeName}'),
-                        if (t.creatorName.isNotEmpty) Text('创建人：${t.creatorName}'),
-                        if (t.description.isNotEmpty) Text('描述：${t.description}'),
-                      ],
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('关闭'),
-                      ),
-                    ],
+                // 跳转到 TaskDetailPage，并传入任务 ID
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TaskDetailPage(taskId: t.id),
                   ),
                 );
               },
