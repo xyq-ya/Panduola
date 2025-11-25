@@ -49,23 +49,7 @@ class _ProfilePageState extends State<ProfilePage> {
         userId = providerId;
         print('当前用户 ID: $userId');
         _fetchUserInfo(userId);
-      } else {
-        // 如果没有用户ID，使用模拟数据
-        _loadMockData();
-      }
     }
-  }
-
-  void _loadMockData() {
-    setState(() {
-      name = '演示用户';
-      role = '普通员工';
-      department = '技术部';
-      team = '前端开发团队';
-      teamId = 1;
-      loading = false;
-    });
-    _loadMockStats();
   }
 
   // 辅助方法：安全解析整数，支持返回 null
@@ -80,22 +64,6 @@ class _ProfilePageState extends State<ProfilePage> {
     return null;
   }
 
-  // 根据团队名称推断 teamId
-  void _inferTeamIdFromTeamName() {
-    if (team.contains('前端')) {
-      teamId = 1;
-      print('根据团队名称推断 teamId: $team -> 1');
-    } else if (team.contains('后端')) {
-      teamId = 2;
-      print('根据团队名称推断 teamId: $team -> 2');
-    } else if (team.contains('移动')) {
-      teamId = 3;
-      print('根据团队名称推断 teamId: $team -> 3');
-    } else {
-      teamId = 1; // 默认值
-      print('无法推断团队ID，使用默认值: 1');
-    }
-  }
 
   Future<void> _fetchUserInfo(int userId) async {
     if (userId <= 0) {
@@ -104,8 +72,10 @@ class _ProfilePageState extends State<ProfilePage> {
     }
 
     try {
+      // 使用 UserProvider 生成 URL
+      final url = Uri.parse(UserProvider.getApiUrl('user_info'));
       final res = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/user_info'),
+        url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': userId}),
       );
@@ -122,27 +92,13 @@ class _ProfilePageState extends State<ProfilePage> {
       }
 
       final data = body['data'];
-      print('用户信息数据: $data');
-
-      // 根据团队名称推断 teamId
-      int inferredTeamId = 0;
-      String teamName = data['team'] ?? '';
-      if (teamName.contains('前端')) {
-        inferredTeamId = 1;
-      } else if (teamName.contains('后端')) {
-        inferredTeamId = 2;
-      } else if (teamName.contains('移动')) {
-        inferredTeamId = 3;
-      } else {
-        inferredTeamId = 1; // 默认值
-      }
-
+      print('用户信息数据: $data')
       setState(() {
         name = data['username'] ?? '未知用户';
         role = data['role_name'] ?? '未知角色';
         department = data['department'] ?? '未知部门';
-        team = teamName;
-        teamId = _parseInt(data['team_id']) ?? inferredTeamId;
+        team = data['team'] ?? '未知团队';
+        teamId = _parseInt(data['team_id']); // 直接使用接口返回的 team_id
         loading = false;
       });
 
@@ -150,33 +106,21 @@ class _ProfilePageState extends State<ProfilePage> {
 
     } catch (e) {
       print('获取用户信息失败: $e');
-      // 如果API失败，使用模拟数据
-      _loadMockData();
     }
   }
 
   Future<void> _fetchTeamMembers() async {
-    // 如果 teamId 为 null 或 0，根据团队名称推断
-    if (teamId == null || teamId == 0) {
-      _inferTeamIdFromTeamName();
-    }
-
-    if (teamId == null || teamId == 0) {
-      print('teamId 为 null 或 0，无法获取团队成员');
-      _loadMockTeamMembers();
-      return;
-    }
-
     setState(() {
       loadingTeamMembers = true;
     });
 
     try {
+      final url = Uri.parse(UserProvider.getApiUrl('get_team_members'));
       final res = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/get_team_members'),
+        url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'team_id': teamId,
+          'team_id': teamId,          // 直接使用接口返回的 teamId
           'current_user_id': userId,
         }),
       );
@@ -215,64 +159,19 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       print('获取团队成员失败: $e');
     }
-
-    // 如果API不可用，使用模拟数据
-    _loadMockTeamMembers();
     setState(() {
       loadingTeamMembers = false;
     });
   }
 
-  void _loadMockTeamMembers() {
-    List<TeamMember> mockMembers = [];
-
-    // 确保使用有效的用户ID
-    int effectiveUserId = userId > 0 ? userId : 1;
-
-    // 确保使用有效的团队ID
-    int effectiveTeamId = (teamId != null && teamId! > 0) ? teamId! : 1;
-
-    if (effectiveTeamId == 1) { // 前端开发团队
-      mockMembers = [
-        TeamMember(id: 1, name: '超级管理员', role: '管理员', email: 'admin@company.com', mobile: '13800000000', isCurrentUser: effectiveUserId == 1),
-        TeamMember(id: 2, name: '王伟', role: '部门老总', email: 'tech_boss@company.com', mobile: '13800000001', isCurrentUser: effectiveUserId == 2),
-        TeamMember(id: 3, name: '李娜', role: '部门经理', email: 'tech_manager@company.com', mobile: '13800000002', isCurrentUser: effectiveUserId == 3),
-        TeamMember(id: 4, name: '张三', role: '团队队长', email: 'frontend_leader@company.com', mobile: '13800000003', isCurrentUser: effectiveUserId == 4),
-        TeamMember(id: 5, name: '赵四', role: '普通员工', email: 'frontend1@company.com', mobile: '13800000004', isCurrentUser: effectiveUserId == 5),
-      ];
-    } else if (effectiveTeamId == 2) { // 后端开发团队
-      mockMembers = [
-        TeamMember(id: 2, name: '王伟', role: '部门老总', email: 'tech_boss@company.com', mobile: '13800000001', isCurrentUser: effectiveUserId == 2),
-        TeamMember(id: 6, name: '钱五', role: '团队队长', email: 'backend_leader@company.com', mobile: '13800000005', isCurrentUser: effectiveUserId == 6),
-        TeamMember(id: 7, name: '孙六', role: '普通员工', email: 'backend1@company.com', mobile: '13800000006', isCurrentUser: effectiveUserId == 7),
-      ];
-    } else {
-      // 默认模拟数据 - 使用有效的用户ID
-      mockMembers = [
-        TeamMember(id: effectiveUserId, name: name, role: role, email: 'user@company.com', mobile: '13800000000', isCurrentUser: true),
-        TeamMember(id: 100, name: '团队成员A', role: '前端开发', email: 'teama@company.com', mobile: '13800000001', isCurrentUser: false),
-        TeamMember(id: 101, name: '团队成员B', role: '后端开发', email: 'teamb@company.com', mobile: '13800000002', isCurrentUser: false),
-        TeamMember(id: 102, name: '团队成员C', role: '产品经理', email: 'teamc@company.com', mobile: '13800000003', isCurrentUser: false),
-      ];
-    }
-
-    setState(() {
-      teamMembers = mockMembers;
-    });
-    print('使用模拟团队成员数据，共 ${mockMembers.length} 人');
-  }
 
   Future<void> _fetchUserStats(int userId) async {
-    if (userId <= 0) {
-      _loadMockStats();
-      return;
-    }
-
     try {
       print('开始获取用户统计数据，userId: $userId');
 
+      final url = Uri.parse(UserProvider.getApiUrl('get_user_stats'));
       final res = await http.post(
-        Uri.parse('http://10.0.2.2:5000/api/get_user_stats'),
+        url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': userId}),
       ).timeout(const Duration(seconds: 10));
@@ -287,16 +186,12 @@ class _ProfilePageState extends State<ProfilePage> {
         if (body['code'] == 0) {
           final data = body['data'];
           print('用户统计数据: $data');
-
-          // 处理数据
           double completionRate = 0.0;
           if (data['completion_rate'] != null) {
             if (data['completion_rate'] is String) {
               completionRate = double.tryParse(data['completion_rate']) ?? 0.0;
-            } else if (data['completion_rate'] is int) {
-              completionRate = data['completion_rate'].toDouble();
             } else {
-              completionRate = data['completion_rate']?.toDouble() ?? 0.0;
+              completionRate = (data['completion_rate'] as num).toDouble();
             }
           }
 
@@ -311,7 +206,6 @@ class _ProfilePageState extends State<ProfilePage> {
           });
           print('成功处理统计数据: $stats');
 
-          // 显示成功提示
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -324,61 +218,13 @@ class _ProfilePageState extends State<ProfilePage> {
           return;
         } else {
           print('用户统计接口业务错误: ${body['msg']}');
-          // 不再显示错误对话框，直接使用模拟数据
-          _loadMockStats();
         }
       } else {
         print('用户统计HTTP错误: ${res.statusCode}');
-        _loadMockStats();
       }
     } catch (e) {
       print('获取统计数据异常: $e');
-      _loadMockStats();
     }
-  }
-
-  void _loadMockStats() {
-    // 根据用户角色和当前时间生成不同的模拟数据
-    double completionRate = 0.0;
-    int totalTasks = 0;
-    int completedTasks = 0;
-    int inProgressTasks = 0;
-    int pendingTasks = 0;
-
-    // 基于角色生成基础数据
-    if (role.contains('管理员') || role.contains('老总')) {
-      completionRate = 75.0 + (DateTime.now().millisecond % 20); // 75-95%
-      totalTasks = 20 + (DateTime.now().millisecond % 10); // 20-30
-      completedTasks = (totalTasks * completionRate / 100).round();
-    } else if (role.contains('经理') || role.contains('队长')) {
-      completionRate = 65.0 + (DateTime.now().millisecond % 25); // 65-90%
-      totalTasks = 15 + (DateTime.now().millisecond % 8); // 15-23
-      completedTasks = (totalTasks * completionRate / 100).round();
-    } else {
-      completionRate = 50.0 + (DateTime.now().millisecond % 35); // 50-85%
-      totalTasks = 8 + (DateTime.now().millisecond % 7); // 8-15
-      completedTasks = (totalTasks * completionRate / 100).round();
-    }
-
-    // 计算进行中和待开始的任务
-    inProgressTasks = (totalTasks - completedTasks) ~/ 2;
-    pendingTasks = totalTasks - completedTasks - inProgressTasks;
-
-    // 确保数据合理性
-    if (completedTasks > totalTasks) completedTasks = totalTasks;
-    if (inProgressTasks < 0) inProgressTasks = 0;
-    if (pendingTasks < 0) pendingTasks = 0;
-
-    setState(() {
-      stats = {
-        'totalTasks': totalTasks,
-        'completedTasks': completedTasks,
-        'completionRate': double.parse(completionRate.toStringAsFixed(1)),
-        'inProgressTasks': inProgressTasks,
-        'pendingTasks': pendingTasks,
-      };
-    });
-    print('生成模拟统计数据: $stats');
   }
 
   // 退出登录方法
@@ -481,25 +327,6 @@ class _ProfilePageState extends State<ProfilePage> {
               _infoCard('所属部门', department, const Color(0xFF2563EB)),
               _infoCard('所属团队', team, const Color(0xFF16A34A)),
               const SizedBox(height: 16),
-              // 退出登录按钮
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 40),
-                child: ElevatedButton.icon(
-                  onPressed: _logout,
-                  icon: const Icon(Icons.logout, size: 20),
-                  label: const Text('退出登录', style: TextStyle(fontSize: 16)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.shade50,
-                    foregroundColor: Colors.red,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(color: Colors.red.shade200),
-                    ),
-                    minimumSize: const Size(double.infinity, 50),
-                  ),
-                ),
-              ),
             ],
           ),
         ),
@@ -528,25 +355,27 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _buildProfileItem(IconData icon, String title, Color color, int index) {
     return GestureDetector(
       onTap: () {
-        if (index == 1) {
+        if (index == 0) {
+          // 系统设置页面
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SettingsPage()),
+          );
+        } else if (index == 1) {
           // 团队成员页面，需要加载数据
-          print('点击团队成员，当前teamId: $teamId');
           if (teamId != null && teamId! > 0) {
             _fetchTeamMembers();
-          } else {
-            print('teamId无效，使用模拟数据');
-            _loadMockTeamMembers();
           }
         } else if (index == 2) {
           // 数据报表页面
-          print('点击数据报表，当前userId: $userId');
           if (userId > 0) {
             _fetchUserStats(userId);
-          } else {
-            print('userId无效，使用模拟数据');
-            _loadMockStats();
           }
+        } else if (index == 3) {
+          // 帮助中心
         }
+
+        // 切换当前 Index
         if (index > 0) {
           setState(() {
             _currentIndex = index;
@@ -892,8 +721,6 @@ class _ProfilePageState extends State<ProfilePage> {
               print('手动刷新数据报表');
               if (userId > 0) {
                 _fetchUserStats(userId);
-              } else {
-                _loadMockStats();
               }
             },
             icon: const Icon(Icons.refresh),
@@ -1051,6 +878,292 @@ class _ProfilePageState extends State<ProfilePage> {
             SingleChildScrollView(child: _buildStatsSection()),
             _buildHelpCenterSection(),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class TeamMember {
+  final int id;
+  final String name;
+  final String role;
+  final String email;
+  final String mobile;
+  final bool isCurrentUser;
+
+  TeamMember({
+    required this.id,
+    required this.name,
+    required this.role,
+    required this.email,
+    required this.mobile,
+    required this.isCurrentUser,
+  });
+}
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
+
+  void _logout(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认退出'),
+        content: const Text('确定要退出登录吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              // 清除用户信息
+              Provider.of<UserProvider>(context, listen: false).setId(0);
+              Navigator.of(context).pop();
+              // 返回登录页
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginPage()),
+                (route) => false,
+              );
+            },
+            child: const Text('确定', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('系统设置')),
+      body: ListView(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.person),
+            title: const Text('更改用户信息'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              // 跳转到修改用户信息页面
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const EditProfilePage()),
+              );
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('退出登录'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () => _logout(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+class EditProfilePage extends StatefulWidget {
+  const EditProfilePage({super.key});
+
+  @override
+  State<EditProfilePage> createState() => _EditProfilePageState();
+}
+
+class _EditProfilePageState extends State<EditProfilePage> {
+  final _formKey = GlobalKey<FormState>();
+
+  TextEditingController _usernameController = TextEditingController();
+  TextEditingController _passwordController = TextEditingController();
+  TextEditingController _confirmController = TextEditingController(); // 新增确认密码
+  TextEditingController _nameController = TextEditingController();
+  TextEditingController _emailController = TextEditingController();
+  TextEditingController _mobileController = TextEditingController();
+
+  bool _obscurePassword = true; // 密码是否隐藏
+  bool loading = true;
+  int userId = 0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
+    if (userId == 0 && userProvider.id != null && userProvider.id! > 0) {
+      userId = userProvider.id!;
+      _fetchUserInfo();
+    }
+  }
+
+  Future<void> _fetchUserInfo() async {
+    try {
+      final url = Uri.parse(UserProvider.getApiUrl('get_user_info_byid'));
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId}),
+      );
+
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['code'] == 200) {
+          final data = body['data'];
+          setState(() {
+            _usernameController.text = data['username'] ?? '';
+            _passwordController.text = data['password'] ?? '';
+            _confirmController.text = data['password'] ?? ''; // 初始化确认密码
+            _nameController.text = data['name'] ?? '';
+            _emailController.text = data['email'] ?? '';
+            _mobileController.text = data['mobile'] ?? '';
+            loading = false;
+          });
+        } else {
+          print('接口错误: ${body['msg']}');
+        }
+      }
+    } catch (e) {
+      print('获取用户信息失败: $e');
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    // 密码确认检查
+    if (_passwordController.text != _confirmController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('两次输入的密码不一致')),
+      );
+      return;
+    }
+
+    try {
+      final url = Uri.parse(UserProvider.getApiUrl('update_user_info'));
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'user_id': userId,
+          'username': _usernameController.text.trim(),
+          'password': _passwordController.text.trim(),
+          'name': _nameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'mobile': _mobileController.text.trim(),
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['code'] == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('更新成功')),
+          );
+          Navigator.pop(context);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('更新失败: ${body['msg']}')),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('请求失败: ${res.statusCode}')),
+        );
+      }
+    } catch (e) {
+      print('保存用户信息失败: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('网络异常')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('编辑个人信息')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            children: [
+              TextFormField(
+                controller: _usernameController,
+                decoration: const InputDecoration(
+                  labelText: '用户名',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.isEmpty ? '请输入用户名' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _passwordController,
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
+                  labelText: '密码',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
+                ),
+                validator: (value) => value == null || value.isEmpty ? '请输入密码' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _confirmController,
+                obscureText: _obscurePassword,
+                decoration: const InputDecoration(
+                  labelText: '确认密码',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.isEmpty ? '请确认密码' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: '姓名',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.isEmpty ? '请输入姓名' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: '邮箱',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.isEmpty ? '请输入邮箱' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _mobileController,
+                decoration: const InputDecoration(
+                  labelText: '手机号',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.isEmpty ? '请输入手机号' : null,
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                onPressed: _saveProfile,
+                child: const Text('保存'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

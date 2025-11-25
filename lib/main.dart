@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'pages/login_page.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'providers/user_provider.dart';
+import 'pages/login_page.dart';
+import 'web_pages/web_home_page.dart';
+import 'web_pages/web_login.dart';
 
 void main() {
   runApp(
@@ -26,7 +29,9 @@ class PandoraApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF0F2F5),
         fontFamily: 'Nunito',
       ),
-      home: const LoginPage(),
+
+      // Web → Web登录页，App → App登录页
+      home: kIsWeb ? const WebLoginPage() : const LoginPage(),
     );
   }
 }

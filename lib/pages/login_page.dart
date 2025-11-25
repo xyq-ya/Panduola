@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'home_page.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../utils/api.dart';
 import '../providers/user_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -19,48 +21,96 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  /// 读取保存的用户名、密码和勾选状态
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedUsername = prefs.getString('username') ?? '';
+    final savedPassword = prefs.getString('password') ?? '';
+    final rememberMe = prefs.getBool('remember_me') ?? false;
+
+    setState(() {
+      _usernameController.text = savedUsername;
+      _passwordController.text = savedPassword;
+      _rememberMe = rememberMe;
+    });
+
+    // 如果勾选了“记住我”且用户名密码不为空，自动登录
+    //if (rememberMe && savedUsername.isNotEmpty && savedPassword.isNotEmpty) {
+    //  _login();
+    //}
+  }
+
+  /// 保存用户名和密码
+  Future<void> _saveCredentials(String username, String password) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('username', username);
+    await prefs.setString('password', password);
+    await prefs.setBool('remember_me', true);
+  }
+
+  /// 清除保存的用户名和密码
+  Future<void> _clearCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('username');
+    await prefs.remove('password');
+    await prefs.setBool('remember_me', false);
+  }
+
   Future<void> _login() async {
-  final username = _usernameController.text.trim();
-  final password = _passwordController.text.trim();
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text.trim();
 
-  if (username.isEmpty || password.isEmpty) {
-    _showErrorDialog('请输入用户名和密码');
-    return;
-  }
-
-  setState(() => _isLoading = true);
-
-  try {
-    // 使用 Android 模拟器访问本地 Flask 服务
-    final url = Uri.parse('http://10.0.2.2:5000/api/login');
-
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'username': username, 'password': password}),
-    );
-
-    final data = jsonDecode(response.body);
-
-    if (response.statusCode == 200 && data['id'] != null) {
-
-      Provider.of<UserProvider>(context, listen: false).setId(data['id']);
-
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => HomePage(id: data['id']),
-        ),
-      );
-    } else {
-      _showErrorDialog(data['error'] ?? '登录失败，请检查用户名和密码');
+    if (username.isEmpty || password.isEmpty) {
+      _showErrorDialog('请输入用户名和密码');
+      return;
     }
-  } catch (e) {
-    _showErrorDialog('无法连接服务器，请检查网络或服务器状态');
-  } finally {
-    setState(() => _isLoading = false);
-  }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final apiUrl = UserProvider.getApiUrl('login');
+      final url = Uri.parse(apiUrl);
+
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'username': username, 'password': password}),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['id'] != null) {
+        // 保存用户ID到Provider
+        Provider.of<UserProvider>(context, listen: false).setId(data['id']);
+
+        // 处理记住我逻辑
+        if (_rememberMe) {
+          await _saveCredentials(username, password);
+        } else {
+          await _clearCredentials();
+        }
+
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => HomePage(id: data['id']),
+          ),
+        );
+      } else {
+        _showErrorDialog(data['error'] ?? '登录失败，请检查用户名和密码');
+      }
+    } catch (e) {
+      _showErrorDialog('无法连接服务器，请检查网络或服务器状态');
+    } finally {
+      setState(() => _isLoading = false);
+    }
   }
 
   void _showErrorDialog(String message) {
@@ -97,14 +147,12 @@ class _LoginPageState extends State<LoginPage> {
         ),
         child: Column(
           children: [
-            // 顶部留白和标题
             Expanded(
               flex: 2,
               child: Container(
                 padding: const EdgeInsets.only(top: 80),
                 child: Column(
                   children: [
-                    // 应用图标
                     Container(
                       width: 80,
                       height: 80,
@@ -148,8 +196,6 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
             ),
-
-            // 登录表单区域
             Expanded(
               flex: 3,
               child: Container(
@@ -161,12 +207,11 @@ class _LoginPageState extends State<LoginPage> {
                     topRight: Radius.circular(30),
                   ),
                 ),
-                child: Padding(
+                child: SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Column(
                     children: [
                       const SizedBox(height: 40),
-                      // 欢迎文字
                       const Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
@@ -190,58 +235,33 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                       const SizedBox(height: 40),
-
-                      // 用户名输入框
-                      Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF9FAFB),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE5E7EB)),
-                        ),
-                        child: TextField(
-                          controller: _usernameController,
-                          decoration: const InputDecoration(
-                            prefixIcon: Icon(Icons.person_outline, color: Color(0xFF6B7280)),
-                            hintText: '请输入用户名',
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      // 用户名
+                      _buildInputField(
+                        controller: _usernameController,
+                        hint: '请输入用户名',
+                        icon: Icons.person_outline,
+                      ),
+                      const SizedBox(height: 20),
+                      // 密码
+                      _buildInputField(
+                        controller: _passwordController,
+                        hint: '请输入密码',
+                        icon: Icons.lock_outline,
+                        obscureText: _obscurePassword,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                            color: const Color(0xFF6B7280),
                           ),
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
                         ),
                       ),
                       const SizedBox(height: 20),
-
-                      // 密码输入框
-                      Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF9FAFB),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE5E7EB)),
-                        ),
-                        child: TextField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          decoration: InputDecoration(
-                            prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF6B7280)),
-                            hintText: '请输入密码',
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                                color: const Color(0xFF6B7280),
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePassword = !_obscurePassword;
-                                });
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // 记住我和忘记密码
+                      // 记住我 & 忘记密码
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -258,18 +278,12 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               const Text(
                                 '记住我',
-                                style: TextStyle(
-                                  color: Color(0xFF6B7280),
-                                  fontSize: 14,
-                                ),
+                                style: TextStyle(color: Color(0xFF6B7280), fontSize: 14),
                               ),
                             ],
                           ),
                           GestureDetector(
-                            onTap: () {
-                              // 忘记密码功能
-                              _showErrorDialog('忘记密码功能开发中...');
-                            },
+                            onTap: () => _showErrorDialog('忘记密码功能开发中...'),
                             child: const Text(
                               '忘记密码？',
                               style: TextStyle(
@@ -282,7 +296,6 @@ class _LoginPageState extends State<LoginPage> {
                         ],
                       ),
                       const SizedBox(height: 30),
-
                       // 登录按钮
                       SizedBox(
                         width: double.infinity,
@@ -308,24 +321,14 @@ class _LoginPageState extends State<LoginPage> {
                                 )
                               : const Text(
                                   '登录',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                                 ),
                         ),
                       ),
-
-                      const Spacer(),
                       const SizedBox(height: 20),
-
-                      // 版本信息
                       const Text(
                         '版本 1.0.0',
-                        style: TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 12,
-                        ),
+                        style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
                       ),
                       const SizedBox(height: 20),
                     ],
@@ -334,6 +337,33 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData icon,
+    bool obscureText = false,
+    Widget? suffixIcon,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: TextField(
+        controller: controller,
+        obscureText: obscureText,
+        decoration: InputDecoration(
+          prefixIcon: Icon(icon, color: const Color(0xFF6B7280)),
+          hintText: hint,
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          suffixIcon: suffixIcon,
         ),
       ),
     );
