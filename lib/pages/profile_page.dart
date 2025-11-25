@@ -49,7 +49,6 @@ class _ProfilePageState extends State<ProfilePage> {
         userId = providerId;
         print('当前用户 ID: $userId');
         _fetchUserInfo(userId);
-      }
     }
   }
 
@@ -67,6 +66,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
 
   Future<void> _fetchUserInfo(int userId) async {
+    if (userId <= 0) {
+      _loadMockData();
+      return;
+    }
+
     try {
       // 使用 UserProvider 生成 URL
       final url = Uri.parse(UserProvider.getApiUrl('user_info'));
@@ -88,8 +92,7 @@ class _ProfilePageState extends State<ProfilePage> {
       }
 
       final data = body['data'];
-      print('用户信息数据: $data');
-
+      print('用户信息数据: $data')
       setState(() {
         name = data['username'] ?? '未知用户';
         role = data['role_name'] ?? '未知角色';
@@ -161,6 +164,7 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
+
   Future<void> _fetchUserStats(int userId) async {
     try {
       print('开始获取用户统计数据，userId: $userId');
@@ -182,7 +186,6 @@ class _ProfilePageState extends State<ProfilePage> {
         if (body['code'] == 0) {
           final data = body['data'];
           print('用户统计数据: $data');
-
           double completionRate = 0.0;
           if (data['completion_rate'] != null) {
             if (data['completion_rate'] is String) {
@@ -201,7 +204,6 @@ class _ProfilePageState extends State<ProfilePage> {
               'pendingTasks': _parseInt(data['pending_tasks']) ?? 0,
             };
           });
-
           print('成功处理统计数据: $stats');
 
           if (mounted) {
@@ -1166,4 +1168,22 @@ class _EditProfilePageState extends State<EditProfilePage> {
       ),
     );
   }
+}
+
+class TeamMember {
+  final int id;
+  final String name;
+  final String role;
+  final String email;
+  final String mobile;
+  final bool isCurrentUser;
+
+  TeamMember({
+    required this.id,
+    required this.name,
+    required this.role,
+    required this.email,
+    required this.mobile,
+    required this.isCurrentUser,
+  });
 }

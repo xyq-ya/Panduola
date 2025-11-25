@@ -1429,7 +1429,6 @@ def upload_work_image():
     except Exception as e:
         print("upload_work_image 异常:", e)
         return jsonify({"code": 1, "msg": f"上传失败: {str(e)}"})
-
 # -------------------- 获取团队成员信息 --------------------
 @bp.route('/get_team_members', methods=['POST'])
 def get_team_members():
