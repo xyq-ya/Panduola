@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'task_detail_page.dart';
+import 'home_page.dart';
 import 'package:http/http.dart' as http;
 import '../utils/api.dart';
 import 'ai_debug_page.dart';
@@ -845,6 +846,9 @@ class _AddTaskPageState extends State<AddTaskPage> {
 
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text("任务创建成功")));
+      HomePage.homeKey.currentState?.fetchUnreadCount().then((_) {
+        HomePage.homeKey.currentState?.setState(() {}); // 强制刷新
+       });
       Navigator.pop(context, true);
     } catch (e) {
       debugPrint("提交任务异常: $e");

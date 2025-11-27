@@ -100,7 +100,10 @@ class _LoginPageState extends State<LoginPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => HomePage(id: data['id']),
+            builder: (context) => HomePage(
+              key: HomePage.homeKey, // ⭐ 关键
+              id: data['id'],
+            ),
           ),
         );
       } else {

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../providers/user_provider.dart';
 import 'login_page.dart';
+import 'home_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -23,6 +24,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String department = '';
   String team = '';
   int? teamId;
+  int unreadMessageCount = 0;
 
   // 团队成员数据
   List<TeamMember> teamMembers = [];
@@ -49,6 +51,8 @@ class _ProfilePageState extends State<ProfilePage> {
         userId = providerId;
         print('当前用户 ID: $userId');
         _fetchUserInfo(userId);
+        _fetchUnreadMessageCount();
+      }
     }
   }
 
@@ -108,7 +112,30 @@ class _ProfilePageState extends State<ProfilePage> {
       print('获取用户信息失败: $e');
     }
   }
+  // 获取未读消息数量
+  Future<void> _fetchUnreadMessageCount() async {
+    if (userId <= 0) return;
 
+    try {
+      final url = Uri.parse(UserProvider.getApiUrl('get_unread_message_count'));
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId}),
+      );
+
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['code'] == 0) {
+          setState(() {
+            unreadMessageCount = body['data']['count'] ?? 0;
+          });
+        }
+      }
+    } catch (e) {
+      print('获取未读消息数量失败: $e');
+    }
+  }
   Future<void> _fetchTeamMembers() async {
     setState(() {
       loadingTeamMembers = true;
@@ -340,7 +367,7 @@ class _ProfilePageState extends State<ProfilePage> {
             physics: const NeverScrollableScrollPhysics(),
             children: [
               _buildProfileItem(Icons.settings, '系统设置', const Color(0xFF5C6BC0), 0),
-              _buildProfileItem(Icons.notifications, '消息中心', const Color(0xFFFF9800), 0),
+              _buildProfileItem(Icons.notifications, '消息中心', const Color(0xFFFF9800), 4, badgeCount: unreadMessageCount),
               _buildProfileItem(Icons.book, '项目文档', const Color(0xFF66BB6A), 0),
               _buildProfileItem(Icons.group, '团队成员', const Color(0xFFF44336), 1),
               _buildProfileItem(Icons.pie_chart, '数据报表', const Color(0xFF9C27B0), 2),
@@ -352,50 +379,84 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildProfileItem(IconData icon, String title, Color color, int index) {
+  Widget _buildProfileItem(
+    IconData icon,
+    String title,
+    Color color,
+    int index, {
+    int badgeCount = 0,
+  }) {
     return GestureDetector(
       onTap: () {
         if (index == 0) {
-          // 系统设置页面
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const SettingsPage()),
-          );
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage()));
         } else if (index == 1) {
-          // 团队成员页面，需要加载数据
-          if (teamId != null && teamId! > 0) {
-            _fetchTeamMembers();
-          }
+          if (teamId != null && teamId! > 0) _fetchTeamMembers();
         } else if (index == 2) {
-          // 数据报表页面
-          if (userId > 0) {
-            _fetchUserStats(userId);
-          }
+          if (userId > 0) _fetchUserStats(userId);
         } else if (index == 3) {
           // 帮助中心
+        } else if (index == 4) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => MessageCenterPage(userId: userId)),
+          ).then((_) {
+            // 页面返回后刷新未读消息数量
+            _fetchUnreadMessageCount();
+            HomePage.homeKey.currentState?.fetchUnreadCount().then((_) {
+              HomePage.homeKey.currentState?.setState(() {}); // 强制刷新
+            });
+          });
+          return; 
         }
 
-        // 切换当前 Index
-        if (index > 0) {
-          setState(() {
-            _currentIndex = index;
-          });
-        }
+        if (index > 0) setState(() => _currentIndex = index);
       },
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [color.withOpacity(0.12), color.withOpacity(0.06)],
-          ),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      child: AspectRatio(
+        aspectRatio: 1, // ✅ 保持正方形
+        child: Stack(
+          clipBehavior: Clip.none,
           children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 8),
-            Text(title, style: const TextStyle(fontSize: 13)),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [color.withOpacity(0.12), color.withOpacity(0.06)],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, color: color, size: 30), // 略大点，更好看
+                    const SizedBox(height: 12), // 保持上下空隙
+                    Text(title, style: const TextStyle(fontSize: 14), textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
+            ),
+            if (badgeCount > 0)
+              Positioned(
+                right: -4,
+                top: -4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                  child: Text(
+                    badgeCount > 99 ? '99+' : '$badgeCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1169,21 +1230,138 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 }
+class MessageCenterPage extends StatefulWidget {
+  final int userId;
 
-class TeamMember {
-  final int id;
-  final String name;
-  final String role;
-  final String email;
-  final String mobile;
-  final bool isCurrentUser;
+  const MessageCenterPage({super.key, required this.userId});
 
-  TeamMember({
-    required this.id,
-    required this.name,
-    required this.role,
-    required this.email,
-    required this.mobile,
-    required this.isCurrentUser,
-  });
+  @override
+  State<MessageCenterPage> createState() => _MessageCenterPageState();
+}
+
+class _MessageCenterPageState extends State<MessageCenterPage> {
+  List<Map<String, dynamic>> messages = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAll();
+  }
+
+  Future<void> _loadAll() async {
+    await _fetchUserMessages();
+    setState(() => loading = false);
+  }
+
+  // 获取所有消息
+  Future<void> _fetchUserMessages() async {
+    try {
+      final url = Uri.parse(UserProvider.getApiUrl('get_user_messages'));
+
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': widget.userId}),
+      );
+
+      final resp = jsonDecode(res.body);
+
+      if (resp["code"] == 0) {
+        setState(() {
+          messages = List<Map<String, dynamic>>.from(resp["data"]);
+        });
+      }
+    } catch (e) {
+      print("获取消息失败: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("消息中心"),
+      ),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView.builder(
+              padding: const EdgeInsets.all(10),
+              itemCount: messages.length,
+              itemBuilder: (context, index) {
+                final msg = messages[index];
+                final bool unread = msg["is_read"] == 0;
+
+                return Container(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: unread ? Colors.blue.shade50 : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: unread ? Colors.blue.shade200 : Colors.grey.shade300,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+
+                  child: Stack(
+                    children: [
+                      // 内容主体
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            msg["title"] ?? "任务更新",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: unread ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            msg["content"] ?? "",
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            msg["created_time"],
+                            style: const TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                        ],
+                      ),
+
+                      // 右上角 NEW 红点
+                      if (unread)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text(
+                              "NEW",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
 }
