@@ -480,7 +480,12 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
     );
   }
+<<<<<<< Updated upstream
 // 视图选择器卡片
+=======
+
+  // 视图选择器卡片
+>>>>>>> Stashed changes
   Widget _buildViewSelectorCard() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

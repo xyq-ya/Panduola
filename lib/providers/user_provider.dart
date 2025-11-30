@@ -4,7 +4,11 @@ class UserProvider extends ChangeNotifier {
   int? _id;      // 存储用户 id
   int? get id => _id;
 
+<<<<<<< Updated upstream
   static const String baseUrl = 'http://192.168.10.124:5000';
+=======
+  static const String baseUrl = 'http://10.60.5.248:5000';
+>>>>>>> Stashed changes
   
   void setId(int id) {
     _id = id;

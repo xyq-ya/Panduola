@@ -67,7 +67,15 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _fetchUserInfo(int userId) async {
     if (userId <= 0) {
-      _loadMockData();
+      // 直接设置默认值，不加载模拟数据
+      setState(() {
+        name = '未登录用户';
+        role = '未知角色';
+        department = '未知部门';
+        team = '未知团队';
+        teamId = null;
+        loading = false;
+      });
       return;
     }
 
@@ -92,7 +100,7 @@ class _ProfilePageState extends State<ProfilePage> {
       }
 
       final data = body['data'];
-      print('用户信息数据: $data')
+      print('用户信息数据: $data');
       setState(() {
         name = data['username'] ?? '未知用户';
         role = data['role_name'] ?? '未知角色';
@@ -106,8 +114,24 @@ class _ProfilePageState extends State<ProfilePage> {
 
     } catch (e) {
       print('获取用户信息失败: $e');
+      // 如果获取失败，设置错误状态
+      setState(() {
+        name = '数据加载失败';
+        role = '错误';
+        department = '请检查网络连接';
+        team = '未知';
+        teamId = null;
+        loading = false;
+      });
     }
   }
+<<<<<<< Updated upstream
+=======
+
+  // 获取未读消息数量
+  Future<void> _fetchUnreadMessageCount() async {
+    if (userId <= 0) return;
+>>>>>>> Stashed changes
 
   Future<void> _fetchTeamMembers() async {
     setState(() {

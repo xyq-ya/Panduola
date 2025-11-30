@@ -6,12 +6,17 @@ class DataService {
   static Future<Map<String, dynamic>> getDashboardStats(int userId, {int days = 7}) async {
     try {
       // 直接硬编码完整URL
+<<<<<<< Updated upstream
       const String requestUrl = 'http://192.168.10.124:5000/api/stats_dashboard';
       
+=======
+      const String requestUrl = 'http://10.0.2.2:5000/api/stats_dashboard';
+
+>>>>>>> Stashed changes
       print('🚀 === 开始API请求 ===');
       print('🎯 目标URL: $requestUrl');
       print('📋 请求参数: user_id=$userId, days=$days');
-      
+
       final response = await http.post(
         Uri.parse(requestUrl),
         headers: {'Content-Type': 'application/json'},
