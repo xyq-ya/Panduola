@@ -2,6 +2,8 @@
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from werkzeug.utils import secure_filename
+from fpdf import FPDF
+from flask import send_file
 import os
 import time
 import pymysql
@@ -149,14 +151,14 @@ def user_info():
             return jsonify({"code": 500, "msg": "数据库连接失败"})
             
         cursor = conn.cursor()
-        cursor.execute("SELECT name, role_id, team_id FROM sys_user WHERE id=%s", (user_id,))
+        cursor.execute("SELECT name, role_id, team_id, mbti FROM sys_user WHERE id=%s", (user_id,))
         user = cursor.fetchone()
         if not user:
             cursor.close()
             conn.close()
             return jsonify({"code": 2, "msg": "用户不存在"})
 
-        name, role_id, team_id = user
+        name, role_id, team_id, mbti = user
         role_name = None
         team_name = None
         dept_name = None
@@ -187,7 +189,8 @@ def user_info():
             "role_name": role_name,
             "department": dept_name,
             "team": team_name,
-            "team_id": team_id  # 新增返回 team_id
+            "team_id": team_id,
+            "mbti": mbti
         })
 
         return jsonify({
@@ -198,7 +201,8 @@ def user_info():
                 "role_name": role_name,
                 "department": dept_name,
                 "team": team_name,
-                "team_id": team_id  # 新增返回 team_id
+                "team_id": team_id,
+                "mbti": mbti
             }
         })
 
@@ -1104,8 +1108,8 @@ def edit_user():
         update_sql_parts = ["update_time=%s"]
         update_values = [datetime.now()]
 
-        # 更新普通字段（username, name, password, mobile, email）
-        for key in ['username', 'name', 'password', 'mobile', 'email']:
+        # 更新普通字段（username, name, password, mobile, email, mbti）
+        for key in ['username', 'name', 'password', 'mobile', 'email', 'mbti']:
             if key in update_fields and update_fields[key] is not None:
                 update_sql_parts.append(f"{key}=%s")
                 update_values.append(update_fields[key])
@@ -1617,16 +1621,36 @@ def update_user_info():
     name = data.get('name')
     email = data.get('email')
     mobile = data.get('mobile')
+    mbti = data.get('mbti')  # 新增 MBTI 字段
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            sql = """
-                UPDATE sys_user
-                SET username=%s, password=%s, name=%s, email=%s, mobile=%s
-                WHERE id=%s
-            """
-            cursor.execute(sql, (username, password, name, email, mobile, user_id))
+            update_fields = []
+            update_values = []
+            if username is not None:
+                update_fields.append('username=%s')
+                update_values.append(username)
+            if password is not None:
+                update_fields.append('password=%s')
+                update_values.append(password)
+            if name is not None:
+                update_fields.append('name=%s')
+                update_values.append(name)
+            if email is not None:
+                update_fields.append('email=%s')
+                update_values.append(email)
+            if mobile is not None:
+                update_fields.append('mobile=%s')
+                update_values.append(mobile)
+            if mbti is not None:
+                update_fields.append('mbti=%s')
+                update_values.append(mbti)
+            if not update_fields:
+                return jsonify({'code': 400, 'msg': '无可更新字段'})
+            sql = f"UPDATE sys_user SET {', '.join(update_fields)} WHERE id=%s"
+            update_values.append(user_id)
+            cursor.execute(sql, tuple(update_values))
             conn.commit()
             if cursor.rowcount > 0:
                 return jsonify({'code': 200, 'msg': '更新成功'})
@@ -1740,3 +1764,52 @@ def select_roles():
     except Exception as e:
         print("获取角色列表失败:", e)
         return jsonify({"code": 1, "msg": "获取角色列表失败", "data": []})
+    # -------------------- MBTI PDF报表生成与下载 --------------------
+@bp.route('/generate_mbti_report', methods=['POST'])
+def generate_mbti_report():
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({"code": 1, "msg": "缺少用户ID"}), 400
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, mbti FROM sys_user WHERE id=%s", (user_id,))
+        user = cursor.fetchone()
+        if not user:
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 2, "msg": "用户不存在"}), 404
+        name, mbti = user
+
+        # 可扩展：AI分析结果
+        ai_analysis = f"MBTI类型分析：{mbti or '未填写'}"
+
+        # 生成PDF，注册并使用 SourceHanSansSC-Regular 字体支持中文
+        pdf = FPDF()
+        pdf.add_page()
+        font_path = os.path.join(current_app.root_path, 'fonts', 'SourceHanSansSC-Regular.otf')
+        pdf.add_font('SHS', '', font_path, uni=True)
+        pdf.set_font('SHS', '', 16)
+        pdf.cell(0, 10, f"MBTI分析报表", ln=True, align='C')
+        pdf.set_font('SHS', '', 12)
+        pdf.ln(10)
+        pdf.cell(0, 10, f"用户名：{name}", ln=True)
+        pdf.cell(0, 10, f"MBTI类型：{mbti or '未填写'}", ln=True)
+        pdf.ln(10)
+        pdf.multi_cell(0, 10, ai_analysis)
+
+        # 保存临时文件
+        filename = f"mbti_report_{user_id}.pdf"
+        filepath = os.path.join(current_app.root_path, 'static', 'reports', filename)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        pdf.output(filepath)
+        cursor.close()
+        conn.close()
+
+        # 提供下载
+        return send_file(filepath, as_attachment=True, download_name=filename)
+    except Exception as e:
+        print("生成MBTI报表异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"}), 500

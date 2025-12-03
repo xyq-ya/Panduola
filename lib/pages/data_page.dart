@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 import 'dart:async';
 import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import '../providers/user_provider.dart';
 import '../services/ai_analysis.dart';
 import '../services/data_service.dart';
@@ -20,11 +24,35 @@ class _DataPageState extends State<DataPage> {
   Map<String, double>? _remoteScores;
   String _aiProvider = 'local';
 
+  // 新增：MBTI 字段
+  String _mbti = '';
+
   // 数据库数据状态
   Map<String, dynamic>? _dashboardData;
   bool _isLoading = false;
   String _errorMessage = '';
   bool _hasInitialLoad = false;
+
+  Future<void> _fetchMbti(int userId) async {
+    try {
+      final url = Uri.parse(UserProvider.getApiUrl('user_info'));
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId}),
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['code'] == 0 && body['data'] != null) {
+          setState(() {
+            _mbti = body['data']['mbti']?.toString() ?? '';
+          });
+        }
+      }
+    } catch (e) {
+      // 忽略异常
+    }
+  }
 
   // 从数据库加载数据的方法
   Future<void> _loadDashboardData() async {
@@ -515,18 +543,25 @@ class _DataPageState extends State<DataPage> {
     for (var item in trendData) {
       if (item is Map<String, dynamic>) {
         final date = item['date']?.toString() ?? '';
-        final count = (item['count'] is int) ? item['count'] as int : 
-                     (item['count'] is double) ? (item['count'] as double).toInt() :
-                     int.tryParse(item['count'].toString()) ?? 0;
-        
-        if (date.isNotEmpty && count > 0) {
-          barItems.add(BarChartItem(date: date, value: count.toDouble()));
+        var countRaw = item['count'];
+        double? count;
+        if (countRaw == null) {
+          count = null;
+        } else if (countRaw is int || countRaw is double) {
+          count = countRaw.toDouble();
+        } else if (countRaw is String) {
+          count = double.tryParse(countRaw);
+        } else {
+          count = double.tryParse(countRaw.toString());
+        }
+        if (date.isNotEmpty && count != null && count > 0) {
+          barItems.add(BarChartItem(date: date, value: count));
         }
       }
     }
-    
+    // 如果所有 count 都为 0 或解析失败，显示友好提示
     if (barItems.isEmpty) {
-      return _buildNoDataWidget('趋势数据格式错误');
+      return _buildNoDataWidget('暂无有效趋势数据');
     }
     
     // 限制显示数量，防止超距
@@ -790,7 +825,7 @@ class _DataPageState extends State<DataPage> {
                 ],
               ),
 
-              // AI分析卡片
+              // AI分析卡片 + MBTI展示
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -805,7 +840,27 @@ class _DataPageState extends State<DataPage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Row(
+                          children: [
+                            const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.purple[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'MBTI: ${_mbti.isNotEmpty ? _mbti : '未填写'}',
+                                style: TextStyle(
+                                  color: Colors.purple[700],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                         Row(
                           children: [
                             Text('来源: $_aiProvider', style: const TextStyle(fontSize: 12, color: Colors.grey)),
@@ -814,6 +869,7 @@ class _DataPageState extends State<DataPage> {
                               onPressed: () {
                                 _loadDashboardData();
                                 _refreshAi();
+                                if (_userId != null) _fetchMbti(_userId!);
                               },
                               icon: const Icon(Icons.refresh, size: 16),
                               label: const Text('刷新数据'),
@@ -920,6 +976,90 @@ class _DataPageState extends State<DataPage> {
                             ],
                           )
                         ],
+                      ),
+                    ),
+                    // MBTI PDF报表下载按钮
+                    const SizedBox(height: 16),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.picture_as_pdf, size: 18),
+                        label: const Text('下载MBTI分析报表'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                        ),
+                        onPressed: _userId == null ? null : () async {
+                          final url = Uri.parse('http://10.0.2.2:5000/api/generate_mbti_report');
+                          final res = await http.post(
+                            url,
+                            headers: {'Content-Type': 'application/json'},
+                            body: jsonEncode({'user_id': _userId}),
+                          );
+                          if (res.statusCode == 200) {
+                            final bytes = res.bodyBytes;
+                            final filename = 'mbti_report_${_userId}.pdf';
+                            try {
+                              String desktopPath = '';
+                              if (Platform.isWindows) {
+                                desktopPath = Platform.environment['USERPROFILE'] != null
+                                  ? Platform.environment['USERPROFILE']! + '\\Desktop'
+                                  : '';
+                              } else {
+                                final dir = await getDownloadsDirectory();
+                                desktopPath = dir?.path ?? '';
+                              }
+                              if (desktopPath.isNotEmpty) {
+                                final file = File('$desktopPath\\$filename');
+                                await file.writeAsBytes(bytes);
+                                showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('下载成功'),
+                                    content: Text('MBTI分析报表已保存到桌面：$filename'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(ctx).pop(),
+                                        child: const Text('确定'),
+                                      )
+                                    ],
+                                  ),
+                                );
+                              } else {
+                                throw Exception('无法获取桌面路径');
+                              }
+                            } catch (e) {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('下载成功'),
+                                  content: const Text('MBTI分析报表已生成，请在PC端保存。'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(ctx).pop(),
+                                      child: const Text('确定'),
+                                    )
+                                  ],
+                                ),
+                              );
+                            }
+                          } else {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('下载失败'),
+                                content: Text('服务器返回错误: ${res.statusCode}'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(ctx).pop(),
+                                    child: const Text('确定'),
+                                  )
+                                ],
+                              ),
+                            );
+                          }
+                        },
                       ),
                     ),
                   ],
