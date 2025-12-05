@@ -71,7 +71,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _fetchUserInfo(int userId) async {
     if (userId <= 0) {
-      _loadMockData();
       return;
     }
 
@@ -96,7 +95,7 @@ class _ProfilePageState extends State<ProfilePage> {
       }
 
       final data = body['data'];
-      print('用户信息数据: $data')
+      print('用户信息数据: $data');
       setState(() {
         name = data['username'] ?? '未知用户';
         role = data['role_name'] ?? '未知角色';
