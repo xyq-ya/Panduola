@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'web_user_manage.dart';
 import 'web_task_settings.dart';
+import 'web_department_manage.dart';
+import 'web_team_manage.dart';
 import 'web_login.dart';
 
 class WebHomePage extends StatefulWidget {
@@ -16,6 +18,8 @@ class _WebHomePageState extends State<WebHomePage> {
   final List<Widget> _pages = const [
     WebUserManagePage(),
     WebTaskSettingsPage(),
+    WebDepartmentManagePage(),
+    WebTeamManagePage(),
   ];
 
   @override
@@ -65,6 +69,8 @@ class _WebHomePageState extends State<WebHomePage> {
 
           _menuItem("员工管理", 0),
           _menuItem("任务设置", 1),
+          _menuItem("部门管理", 2),
+          _menuItem("团队管理", 3),
 
           const Spacer(),
           _menuItem("退出登录", -1, isLogout: true),

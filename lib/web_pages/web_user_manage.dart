@@ -18,6 +18,9 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
   List<Map<String, dynamic>> _allUsers = [];
   List<Map<String, dynamic>> _pagedUsers = [];
 
+  String? _originalName;
+  String? _originalEmail;
+  String? _originalMobile;
   String? _selectedDept;
   String? _selectedTeam;
   int _currentPage = 1;
@@ -145,11 +148,19 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
     }
   }
 
-  // ---------------- 用户操作 ----------------
   void _openEditDialog(Map<String, dynamic> user) async {
-    // 更新 controllers 显示用户信息
+    // 保存原始的用户标识信息
+    setState(() {
+      _originalName = user["name"] ?? '';
+      _originalEmail = user["email"] ?? '';
+      _originalMobile = user["mobile"] ?? '';
+    });
+
+    print("🔹 保存原始信息: name=$_originalName, email=$_originalEmail, mobile=$_originalMobile");
+
+    // 更新 controllers 显示用户信息 - 密码字段始终为空
     _controllers['username']!.text = user['username'] ?? '';
-    _controllers['password']!.text = '';
+    _controllers['password']!.text = ''; // 密码字段始终为空
     _controllers['name']!.text = user['name'] ?? '';
     _controllers['mobile']!.text = user['mobile'] ?? '';
     _controllers['email']!.text = user['email'] ?? '';
@@ -161,16 +172,18 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
         Uri.parse(url),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          "name": user["name"] ?? '',
-          "email": user["email"] ?? '',
-          "mobile": user["mobile"] ?? ''
+          "name": _originalName,
+          "email": _originalEmail,
+          "mobile": _originalMobile
         }),
       );
       final data = jsonDecode(resp.body);
+      print("🔹 获取用户信息响应: $data");
+
       if (data["code"] == 0 && data["data"] != null) {
         final u = data["data"];
 
-        // 设置原部门、原团队、原角色
+        // 设置部门、团队、角色信息
         final dept = u["department"];
         final team = u["team_name"];
         final roleId = u["role_id"];
@@ -200,11 +213,10 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
           if (dataRolesRaw is Map<String, dynamic> && dataRolesRaw["code"] == 0) {
             final dataList = dataRolesRaw["data"];
             if (dataList is List) {
-              // 这里是关键，转换数据
               rolesListSafe = dataList.map<Map<String, dynamic>>((role) {
                 return {
-                  "id": role[0],        // 角色 ID
-                  "role_name": role[1],  // 角色名称
+                  "id": role[0],
+                  "role_name": role[1],
                 };
               }).toList();
             }
@@ -222,60 +234,121 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
           _roles = rolesListSafe;
           _editingRoleId = roleId;
           _showEditDialog = true;
-
-          // 更新 controllers 显示详细信息
-          _controllers.forEach((key, ctrl) {
-            ctrl.text = u[key]?.toString() ?? '';
-          });
-
-          // 调试打印
-          print("------调试初值------");
-          print("用户部门: '$dept'");
-          print("部门列表: ${_departments.map((d) => d['dept_name']).toList()}");
-          print("用户团队: '$team'");
-          print("团队列表: ${teamsForDept.map((t) => t['team_name']).toList()}");
-          print("用户角色ID: '$roleId'");
-          print("角色列表: ${rolesListSafe.map((r) => r['role_name']).toList()}");
-          print("--------------------");
+        });
+      } else {
+        // 如果获取详细信息失败，也显示编辑对话框，使用基本信息
+        setState(() {
+          _editingUser = user;
+          _showEditDialog = true;
         });
       }
     } catch (e) {
       print("获取用户信息失败: $e");
+      // 即使获取详细信息失败，也显示编辑对话框
+      setState(() {
+        _editingUser = user;
+        _showEditDialog = true;
+      });
     }
   }
 
   Future<void> _saveEdit() async {
+    // 检查原始信息是否存在
+    if (_originalName == null || _originalEmail == null || _originalMobile == null) {
+      _showErrorSnackBar("用户信息不完整，请重新选择");
+      return;
+    }
+
+    // 前端验证
+    final email = _controllers['email']!.text.trim();
+    final mobile = _controllers['mobile']!.text.trim();
+    final username = _controllers['username']!.text.trim();
+    final name = _controllers['name']!.text.trim();
+    final password = _controllers['password']!.text.trim();
+
+    // 邮箱格式验证
+    final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+    if (email.isNotEmpty && !emailRegex.hasMatch(email)) {
+      _showErrorSnackBar("邮箱格式不正确");
+      return;
+    }
+
+    // 手机号格式验证
+    if (mobile.isNotEmpty && (mobile.length != 11 || !RegExp(r'^[0-9]+$').hasMatch(mobile))) {
+      _showErrorSnackBar("手机号必须是11位数字");
+      return;
+    }
+
+    // 必填字段验证
+    if (username.isEmpty) {
+      _showErrorSnackBar("用户名不能为空");
+      return;
+    }
+    if (name.isEmpty) {
+      _showErrorSnackBar("姓名不能为空");
+      return;
+    }
+    if (email.isEmpty) {
+      _showErrorSnackBar("邮箱不能为空");
+      return;
+    }
+    if (mobile.isEmpty) {
+      _showErrorSnackBar("手机号不能为空");
+      return;
+    }
+
     try {
-      // 更新编辑对象
-      _controllers.forEach((key, ctrl) {
-        _editingUser[key] = ctrl.text;
-      });
+      // 构建更新字段 - 只包含实际有值的字段
+      final updateFields = <String, dynamic>{
+        'username': username,
+        'name': name,
+        'mobile': mobile,
+        'email': email,
+      };
+
+      // 只有在新密码不为空时才更新密码
+      if (password.isNotEmpty) {
+        updateFields['password'] = password;
+      }
+
+      // 更新角色和团队信息
+      if (_editingRoleId != null) {
+        updateFields['role_id'] = _editingRoleId;
+      }
+      if (_editingTeam != null) {
+        updateFields['team_name'] = _editingTeam;
+      }
+
+      print("🔹 原始用户标识: name=$_originalName, email=$_originalEmail, mobile=$_originalMobile");
+      print("🔹 更新字段: $updateFields");
 
       final url = UserProvider.getApiUrl("web/edit_user");
       final body = {
-        "orig_name": _editingUser["name"] ?? '',
-        "orig_email": _editingUser["email"] ?? '',
-        "orig_mobile": _editingUser["mobile"] ?? '',
-        "update_fields": {
-          ..._editingUser,
-          "dept_name": _editingDept,
-          "team_name": _editingTeam,
-          "role_id": _editingRoleId,
-        }
+        "orig_name": _originalName,
+        "orig_email": _originalEmail,
+        "orig_mobile": _originalMobile,
+        "update_fields": updateFields,
       };
+
+      print("🔹 发送请求体: $body");
 
       final resp = await http.post(Uri.parse(url),
           headers: {"Content-Type": "application/json"},
           body: jsonEncode(body));
       final data = jsonDecode(resp.body);
 
-      _closeEditDialog();
-      _fetchAllUsers();
+      print("🔹 后端响应: $data");
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(data["msg"] ?? "修改完成")));
+      if (data["code"] == 0) {
+        _closeEditDialog();
+        _fetchAllUsers();
+        _showSuccessSnackBar(data["msg"] ?? "修改成功");
+      } else {
+        _showErrorSnackBar(data["msg"] ?? "修改失败");
+      }
     } catch (e) {
-      print("编辑用户失败: $e");
+      print("❌ 编辑用户失败: $e");
+      _showErrorSnackBar("网络错误，请重试");
     }
   }
 
@@ -305,10 +378,14 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
                       body: jsonEncode(body));
                   final data = jsonDecode(resp.body);
                   _fetchAllUsers();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(data["msg"] ?? "删除完成")));
+                  if (data["code"] == 0) {
+                    _showSuccessSnackBar(data["msg"] ?? "删除成功");
+                  } else {
+                    _showErrorSnackBar(data["msg"] ?? "删除失败");
+                  }
                 } catch (e) {
                   print("删除用户失败: $e");
+                  _showErrorSnackBar("删除失败");
                 }
               },
               child: const Text("确认")),
@@ -326,7 +403,39 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
     _fetchAllUsers();
   }
 
-  void _closeEditDialog() => setState(() => _showEditDialog = false);
+  void _closeEditDialog() {
+    setState(() {
+      _showEditDialog = false;
+      _originalName = null;
+      _originalEmail = null;
+      _originalMobile = null;
+      // 清空编辑状态
+      _editingUser = {};
+      _editingDept = null;
+      _editingTeam = null;
+      _editingRoleId = null;
+      _editingTeams = [];
+      _roles = [];
+    });
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
 
   // ------------------- 构建 -------------------
   @override
@@ -342,78 +451,78 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
                 style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
             const SizedBox(height: 20),
             Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween, // 保证内容之间有间隔
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(labelText: "选择部门", border: OutlineInputBorder()),
-                      value: _selectedDept,
-                      items: _departments
-                          .map((e) => DropdownMenuItem<String>(
-                                value: e["dept_name"]?.toString(),
-                                child: Text(e["dept_name"] ?? ''),
-                              ))
-                          .toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedDept = val;
-                          _selectedTeam = null;
-                          _teams = [];
-                          if (val != null && val.isNotEmpty) {
-                            _fetchTeams(val);
-                            _fetchAllUsers(dept: val);
-                          } else {
-                            _fetchAllUsers();
-                          }
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(labelText: "选择团队", border: OutlineInputBorder()),
-                      value: _selectedTeam,
-                      items: _teams
-                          .map((e) => DropdownMenuItem<String>(
-                                value: e["team_name"]?.toString(),
-                                child: Text(e["team_name"] ?? ''),
-                              ))
-                          .toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedTeam = val;
-                          if (val != null && val.isNotEmpty) {
-                            _fetchAllUsers(dept: _selectedDept, team: val);
-                          } else if (_selectedDept != null) {
-                            _fetchAllUsers(dept: _selectedDept);
-                          } else {
-                            _fetchAllUsers();
-                          }
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  ElevatedButton(onPressed: _clearSelection, child: const Text("清空选择")),
-                  // 这里是新增的“新增员工”按钮
-                  ElevatedButton(
-                    onPressed: () {
-                      showDialog(
-                        context: context,
-                        builder: (context) {
-                          return AddUserPage();  // 在这里显示 AddUserPage 弹窗
-                        },
-                      );
+              mainAxisAlignment: MainAxisAlignment.spaceBetween, // 保证内容之间有间隔
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(labelText: "选择部门", border: OutlineInputBorder()),
+                    value: _selectedDept,
+                    items: _departments
+                        .map((e) => DropdownMenuItem<String>(
+                      value: e["dept_name"]?.toString(),
+                      child: Text(e["dept_name"] ?? ''),
+                    ))
+                        .toList(),
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedDept = val;
+                        _selectedTeam = null;
+                        _teams = [];
+                        if (val != null && val.isNotEmpty) {
+                          _fetchTeams(val);
+                          _fetchAllUsers(dept: val);
+                        } else {
+                          _fetchAllUsers();
+                        }
+                      });
                     },
-                    child: const Text("新增员工"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue[100],
-                      padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
-                    ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(labelText: "选择团队", border: OutlineInputBorder()),
+                    value: _selectedTeam,
+                    items: _teams
+                        .map((e) => DropdownMenuItem<String>(
+                      value: e["team_name"]?.toString(),
+                      child: Text(e["team_name"] ?? ''),
+                    ))
+                        .toList(),
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedTeam = val;
+                        if (val != null && val.isNotEmpty) {
+                          _fetchAllUsers(dept: _selectedDept, team: val);
+                        } else if (_selectedDept != null) {
+                          _fetchAllUsers(dept: _selectedDept);
+                        } else {
+                          _fetchAllUsers();
+                        }
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 20),
+                ElevatedButton(onPressed: _clearSelection, child: const Text("清空选择")),
+                // 这里是新增的"新增员工"按钮
+                ElevatedButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) {
+                        return AddUserPage();  // 在这里显示 AddUserPage 弹窗
+                      },
+                    );
+                  },
+                  child: const Text("新增员工"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[100],
+                    padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 20),
             Expanded(
               child: Container(
@@ -442,33 +551,33 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
                       child: _pagedUsers.isEmpty
                           ? const Center(child: Text("暂无员工"))
                           : ListView.builder(
-                              itemCount: _pagedUsers.length,
-                              itemBuilder: (_, index) {
-                                final user = _pagedUsers[index];
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: Row(
-                                    children: [
-                                      Expanded(flex: 2, child: Text(user["name"] ?? '')),
-                                      Expanded(flex: 3, child: Text(user["email"] ?? '')),
-                                      Expanded(flex: 2, child: Text(user["mobile"] ?? '')),
-                                      Expanded(
-                                          flex: 3,
-                                          child: Row(
-                                            children: [
-                                              IconButton(
-                                                  onPressed: () => _openEditDialog(user),
-                                                  icon: const Icon(Icons.edit, color: Colors.blue)),
-                                              IconButton(
-                                                  onPressed: () => _deleteUser(user),
-                                                  icon: const Icon(Icons.delete, color: Colors.red)),
-                                            ],
-                                          ))
-                                    ],
-                                  ),
-                                );
-                              },
+                        itemCount: _pagedUsers.length,
+                        itemBuilder: (_, index) {
+                          final user = _pagedUsers[index];
+                          return Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Row(
+                              children: [
+                                Expanded(flex: 2, child: Text(user["name"] ?? '')),
+                                Expanded(flex: 3, child: Text(user["email"] ?? '')),
+                                Expanded(flex: 2, child: Text(user["mobile"] ?? '')),
+                                Expanded(
+                                    flex: 3,
+                                    child: Row(
+                                      children: [
+                                        IconButton(
+                                            onPressed: () => _openEditDialog(user),
+                                            icon: const Icon(Icons.edit, color: Colors.blue)),
+                                        IconButton(
+                                            onPressed: () => _deleteUser(user),
+                                            icon: const Icon(Icons.delete, color: Colors.red)),
+                                      ],
+                                    ))
+                              ],
                             ),
+                          );
+                        },
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -495,49 +604,49 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
                 child: GestureDetector(
                   onTap: () {}, // 防止点击穿透
                   child: UserEditDialog(
-                  user: _editingUser,
-                  userControllers: _controllers,
-                  departments: _departments,
-                  teams: _editingTeams,
-                  roles: _roles,                 // 新增
-                  editingDept: _editingDept,
-                  editingTeam: _editingTeam,
-                  editingRoleId: _editingRoleId, // 新增
-                  onDeptChanged: (val) async {
-                    if (val == null) return;
+                    user: _editingUser,
+                    userControllers: _controllers,
+                    departments: _departments,
+                    teams: _editingTeams,
+                    roles: _roles,                 // 新增
+                    editingDept: _editingDept,
+                    editingTeam: _editingTeam,
+                    editingRoleId: _editingRoleId, // 新增
+                    onDeptChanged: (val) async {
+                      if (val == null) return;
 
-                    try {
-                      final urlTeams = UserProvider.getApiUrl("select_team");
-                      final respTeams = await http.post(
-                        Uri.parse(urlTeams),
-                        headers: {"Content-Type": "application/json"},
-                        body: jsonEncode({"department": val}),
-                      );
-                      final dataTeams = jsonDecode(respTeams.body);
-                      final teamsForDept =
-                          (dataTeams["code"] == 0 && dataTeams["data"] != null)
-                              ? List<Map<String, dynamic>>.from(dataTeams["data"])
-                              : <Map<String, dynamic>>[];
+                      try {
+                        final urlTeams = UserProvider.getApiUrl("select_team");
+                        final respTeams = await http.post(
+                          Uri.parse(urlTeams),
+                          headers: {"Content-Type": "application/json"},
+                          body: jsonEncode({"department": val}),
+                        );
+                        final dataTeams = jsonDecode(respTeams.body);
+                        final teamsForDept =
+                        (dataTeams["code"] == 0 && dataTeams["data"] != null)
+                            ? List<Map<String, dynamic>>.from(dataTeams["data"])
+                            : <Map<String, dynamic>>[];
 
-                      setState(() {
-                        _editingDept = val;
-                        _editingTeam = null;
-                        _editingTeams = teamsForDept;
-                      });
-                    } catch (e) {
-                      print("获取团队失败: $e");
-                      setState(() {
-                        _editingDept = val;
-                        _editingTeam = null;
-                        _editingTeams = [];
-                      });
-                    }
-                  },
-                  onTeamChanged: (val) => setState(() => _editingTeam = val),
-                  onRoleChanged: (val) => setState(() => _editingRoleId = val), // 新增
-                  onSave: _saveEdit,
-                  onCancel: _closeEditDialog,
-                ),
+                        setState(() {
+                          _editingDept = val;
+                          _editingTeam = null;
+                          _editingTeams = teamsForDept;
+                        });
+                      } catch (e) {
+                        print("获取团队失败: $e");
+                        setState(() {
+                          _editingDept = val;
+                          _editingTeam = null;
+                          _editingTeams = [];
+                        });
+                      }
+                    },
+                    onTeamChanged: (val) => setState(() => _editingTeam = val),
+                    onRoleChanged: (val) => setState(() => _editingRoleId = val), // 新增
+                    onSave: _saveEdit,
+                    onCancel: _closeEditDialog,
+                  ),
                 ),
               ),
             ),
@@ -582,17 +691,17 @@ class UserEditDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final safeDept = editingDept != null &&
-            departments.any((d) => d['dept_name'] == editingDept)
+        departments.any((d) => d['dept_name'] == editingDept)
         ? editingDept
         : null;
     final safeTeam = editingTeam != null &&
-            teams.any((t) => t['team_name'] == editingTeam)
+        teams.any((t) => t['team_name'] == editingTeam)
         ? editingTeam
         : null;
     final safeRoleId = editingRoleId != null &&
         roles.any((r) => r['id'] == editingRoleId)
-    ? editingRoleId
-    : null;
+        ? editingRoleId
+        : null;
 
     return Container(
       width: 600,
@@ -614,54 +723,90 @@ class UserEditDialog extends StatelessWidget {
                   "编辑用户",
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue),
                 ),
-                IconButton(onPressed: onCancel, icon: const Icon(Icons.close, color: Colors.blue))
+                IconButton(
+                    onPressed: onCancel,
+                    icon: const Icon(Icons.close, color: Colors.blue)
+                )
               ],
             ),
             const SizedBox(height: 10),
-            // 文本字段
-            ...['username', 'password', 'name', 'mobile', 'email'].map(
-              (key) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: TextFormField(
-                  controller: userControllers[key],
-                  obscureText: key == 'password',
-                  decoration: InputDecoration(labelText: key, border: const OutlineInputBorder()),
-                  onChanged: (val) => user[key] = val,
-                ),
-              ),
+
+            // 用户名
+            _buildTextField('用户名', userControllers['username']!),
+            const SizedBox(height: 10),
+
+            // 密码 - 留空表示不修改
+            _buildTextField(
+                '密码',
+                userControllers['password']!,
+                obscureText: true,
+                hintText: '如需修改密码请输入新密码，留空保持原密码'
             ),
             const SizedBox(height: 10),
+
+            // 姓名
+            _buildTextField('姓名', userControllers['name']!),
+            const SizedBox(height: 10),
+
+            // 手机号
+            _buildMobileField('手机号', userControllers['mobile']!),
+            const SizedBox(height: 10),
+
+            // 邮箱
+            _buildEmailField('邮箱', userControllers['email']!),
+            const SizedBox(height: 10),
+
             // 部门下拉
             DropdownButtonFormField<String>(
-              decoration: const InputDecoration(labelText: "部门", border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                  labelText: "部门",
+                  border: OutlineInputBorder()
+              ),
               value: safeDept,
               items: departments
-                  .map((d) => d['dept_name']?.toString() ?? '')
-                  .where((v) => v.isNotEmpty)
-                  .toSet()
-                  .map((v) => DropdownMenuItem<String>(value: v, child: Text(v)))
+                  .map((d) => DropdownMenuItem<String>(
+                value: d['dept_name']?.toString(),
+                child: Text(d['dept_name'] ?? ''),
+              ))
                   .toList(),
               onChanged: onDeptChanged,
             ),
             const SizedBox(height: 10),
+
             // 团队下拉
+            DropdownButtonFormField<String>(
+              decoration: const InputDecoration(
+                  labelText: "团队",
+                  border: OutlineInputBorder()
+              ),
+              value: safeTeam,
+              items: teams
+                  .map((t) => DropdownMenuItem<String>(
+                value: t['team_name']?.toString(),
+                child: Text(t['team_name'] ?? ''),
+              ))
+                  .toList(),
+              onChanged: onTeamChanged,
+            ),
+            const SizedBox(height: 10),
+
+            // 权限下拉
             DropdownButtonFormField<int>(
-              decoration: const InputDecoration(labelText: "权限等级", border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                  labelText: "权限等级",
+                  border: OutlineInputBorder()
+              ),
               value: safeRoleId,
               items: roles
-                  // 去重，防止重复 id
-                  .fold<List<Map<String, dynamic>>>([], (prev, element) {
-                    if (!prev.any((e) => e['id'] == element['id'])) prev.add(element);
-                    return prev;
-                  })
                   .map((r) => DropdownMenuItem<int>(
-                        value: r['id'],
-                        child: Text(r['role_name'] ?? ''),
-                      ))
+                value: r['id'],
+                child: Text(r['role_name'] ?? ''),
+              ))
                   .toList(),
               onChanged: onRoleChanged,
             ),
             const SizedBox(height: 20),
+
             // 保存/取消按钮
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -684,8 +829,71 @@ class UserEditDialog extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildTextField(
+      String label,
+      TextEditingController controller,
+      {
+        bool obscureText = false,
+        String? hintText
+      }
+      ) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscureText,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hintText,
+        border: const OutlineInputBorder(),
+      ),
+    );
+  }
+
+  Widget _buildEmailField(String label, TextEditingController controller) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.emailAddress,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+        hintText: 'example@company.com',
+      ),
+      validator: (value) {
+        if (value != null && value.isNotEmpty) {
+          final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+          if (!emailRegex.hasMatch(value)) {
+            return '请输入有效的邮箱地址';
+          }
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildMobileField(String label, TextEditingController controller) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.phone,
+      maxLength: 11,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+        hintText: '13800138000',
+        counterText: '',
+      ),
+      validator: (value) {
+        if (value != null && value.isNotEmpty) {
+          if (value.length != 11 || !RegExp(r'^[0-9]+$').hasMatch(value)) {
+            return '手机号必须是11位数字';
+          }
+        }
+        return null;
+      },
+    );
+  }
 }
-// 部分代码修改如下：
+
+// 新增员工页面
 class AddUserPage extends StatefulWidget {
   const AddUserPage({super.key});
 
@@ -708,15 +916,21 @@ class _AddUserPageState extends State<AddUserPage> {
 
   List<Map<String, dynamic>> _departments = [];
   List<Map<String, dynamic>> _teams = [];
-  List<Map<String, dynamic>> _roles = []; // 修改为 _roles 来绑定角色列表
+  List<Map<String, dynamic>> _roles = [];
 
-  bool _isTeamDropdownEnabled = false; // 控制团队下拉框是否可用
+  final _formKey = GlobalKey<FormState>();
 
   @override
   void initState() {
     super.initState();
     _fetchDepartments();
     _fetchRoles();
+  }
+
+  @override
+  void dispose() {
+    _controllers.forEach((_, ctrl) => ctrl.dispose());
+    super.dispose();
   }
 
   // 获取部门列表
@@ -746,11 +960,10 @@ class _AddUserPageState extends State<AddUserPage> {
         final dataList = dataRolesRaw["data"];
         if (dataList is List) {
           setState(() {
-            // 将角色数据绑定到 _roles
             _roles = dataList.map<Map<String, dynamic>>((role) {
               return {
-                "id": role[0],        // 角色 ID
-                "role_name": role[1],  // 角色名称
+                "id": role[0],
+                "role_name": role[1],
               };
             }).toList();
           });
@@ -774,32 +987,26 @@ class _AddUserPageState extends State<AddUserPage> {
       if (data["code"] == 0 && data["data"] != null) {
         setState(() {
           _teams = List<Map<String, dynamic>>.from(data["data"]);
-          _isTeamDropdownEnabled = true; // 启用团队下拉框
-        });
-      } else {
-        setState(() {
-          _teams.clear(); // 清空团队数据
-          _isTeamDropdownEnabled = false; // 禁用团队下拉框
         });
       }
     } catch (e) {
       print("获取团队失败: $e");
-      setState(() {
-        _teams.clear();
-        _isTeamDropdownEnabled = false;
-      });
     }
   }
 
   // 保存新员工
   Future<void> _saveNewUser() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
     try {
       final newUser = {
-        "username": _controllers['username']!.text,
-        "password": _controllers['password']!.text,
-        "name": _controllers['name']!.text,
-        "mobile": _controllers['mobile']!.text,
-        "email": _controllers['email']!.text,
+        "username": _controllers['username']!.text.trim(),
+        "password": _controllers['password']!.text.trim(),
+        "name": _controllers['name']!.text.trim(),
+        "mobile": _controllers['mobile']!.text.trim(),
+        "email": _controllers['email']!.text.trim(),
         "dept_name": _selectedDept,
         "team_name": _selectedTeam,
         "role_id": _selectedRoleId,
@@ -813,13 +1020,31 @@ class _AddUserPageState extends State<AddUserPage> {
       );
 
       final data = jsonDecode(resp.body);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data["msg"] ?? "新增成功")));
 
       if (data["code"] == 0) {
-        Navigator.pop(context); // 返回上一级
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data["msg"] ?? "新增成功"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data["msg"] ?? "新增失败"),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e) {
       print("保存新员工失败: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("网络错误，请重试"),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -828,7 +1053,7 @@ class _AddUserPageState extends State<AddUserPage> {
     return Dialog(
       insetPadding: const EdgeInsets.all(16.0),
       child: Container(
-        width: 600, // 设置对话框宽度，确保一致
+        width: 600,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -836,60 +1061,47 @@ class _AddUserPageState extends State<AddUserPage> {
           boxShadow: [BoxShadow(blurRadius: 12, color: Colors.blue.shade200)],
         ),
         child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "新增员工",
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
-              ),
-              const SizedBox(height: 16),
-              _buildTextField('用户名', _controllers['username']!),
-              const SizedBox(height: 10),
-              _buildTextField('密码', _controllers['password']!, obscureText: true),
-              const SizedBox(height: 10),
-              _buildTextField('姓名', _controllers['name']!),
-              const SizedBox(height: 10),
-              _buildTextField('手机号', _controllers['mobile']!),
-              const SizedBox(height: 10),
-              _buildTextField('邮箱', _controllers['email']!),
-              const SizedBox(height: 16),
-              _buildDropdown('选择部门', _departments, _selectedDept, (value) {
-                setState(() {
-                  _selectedDept = value;
-                  _selectedTeam = null;
-                  _teams.clear();
-                  _isTeamDropdownEnabled = false; // 重置团队选择框
-                  if (value != null) _fetchTeams(value);
-                });
-              }),
-              const SizedBox(height: 10),
-              _buildDropdown('选择团队', _teams, _selectedTeam, (value) {
-                setState(() {
-                  _selectedTeam = value;
-                });
-              }, enabled: _isTeamDropdownEnabled), // 根据获取结果启用/禁用团队选择框
-              const SizedBox(height: 10),
-              _buildDropdown('选择角色', _roles, _selectedRoleId, (value) {
-                setState(() {
-                  _selectedRoleId = value;
-                });
-              }),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  ElevatedButton(
-                    onPressed: _saveNewUser,
-                    child: const Text("保存"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blueAccent,
-                      padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "新增员工",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+                ),
+                const SizedBox(height: 16),
+                _buildTextField('用户名', _controllers['username']!, isRequired: true),
+                const SizedBox(height: 10),
+                _buildTextField('密码', _controllers['password']!, obscureText: true, isRequired: true),
+                const SizedBox(height: 10),
+                _buildTextField('姓名', _controllers['name']!, isRequired: true),
+                const SizedBox(height: 10),
+                _buildMobileField('手机号', _controllers['mobile']!, isRequired: true),
+                const SizedBox(height: 10),
+                _buildEmailField('邮箱', _controllers['email']!, isRequired: true),
+                const SizedBox(height: 16),
+                _buildDeptDropdown(),
+                const SizedBox(height: 10),
+                _buildTeamDropdown(),
+                const SizedBox(height: 10),
+                _buildRoleDropdown(),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _saveNewUser,
+                      child: const Text("保存"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueAccent,
+                        padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -897,40 +1109,142 @@ class _AddUserPageState extends State<AddUserPage> {
   }
 
   // 创建文本框
-  Widget _buildTextField(String label, TextEditingController controller, {bool obscureText = false}) {
-    return TextField(
+  Widget _buildTextField(String label, TextEditingController controller, {bool obscureText = false, bool isRequired = false}) {
+    return TextFormField(
       controller: controller,
       obscureText: obscureText,
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
       ),
+      validator: (value) {
+        if (isRequired && (value == null || value.isEmpty)) {
+          return '$label不能为空';
+        }
+        return null;
+      },
     );
   }
 
-  // 创建下拉框
-  Widget _buildDropdown(
-    String label,
-    List<Map<String, dynamic>> items,
-    dynamic selectedValue,
-    Function(dynamic) onChanged, {
-    bool enabled = true,
-  }) {
-    return DropdownButtonFormField(
+  // 邮箱字段
+  Widget _buildEmailField(String label, TextEditingController controller, {bool isRequired = false}) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.emailAddress,
       decoration: InputDecoration(
-        labelText: label.isNotEmpty ? label : '请选择',
+        labelText: label,
         border: const OutlineInputBorder(),
+        hintText: 'example@company.com',
       ),
-      value: selectedValue?.toString(), // 确保这里是 String 类型
-      items: items.map((item) {
-        return DropdownMenuItem(
-          value: item["id"].toString(),  // 将 id 转换为 String
-          child: Text(item["dept_name"] ?? item["team_name"] ?? item["role_name"] ?? '无数据'),
+      validator: (value) {
+        if (isRequired && (value == null || value.isEmpty)) {
+          return '$label不能为空';
+        }
+        if (value != null && value.isNotEmpty) {
+          final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+          if (!emailRegex.hasMatch(value)) {
+            return '请输入有效的邮箱地址';
+          }
+        }
+        return null;
+      },
+    );
+  }
+
+  // 手机号字段
+  Widget _buildMobileField(String label, TextEditingController controller, {bool isRequired = false}) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.phone,
+      maxLength: 11,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+        hintText: '13800138000',
+        counterText: '',
+      ),
+      validator: (value) {
+        if (isRequired && (value == null || value.isEmpty)) {
+          return '$label不能为空';
+        }
+        if (value != null && value.isNotEmpty) {
+          if (value.length != 11 || !RegExp(r'^[0-9]+$').hasMatch(value)) {
+            return '手机号必须是11位数字';
+          }
+        }
+        return null;
+      },
+    );
+  }
+
+  // 部门下拉框
+  Widget _buildDeptDropdown() {
+    return DropdownButtonFormField<String>(
+      decoration: const InputDecoration(
+        labelText: "选择部门",
+        border: OutlineInputBorder(),
+      ),
+      value: _selectedDept,
+      items: _departments.map((dept) {
+        return DropdownMenuItem<String>(
+          value: dept["dept_name"]?.toString(),
+          child: Text(dept["dept_name"] ?? ''),
         );
       }).toList(),
-      onChanged: enabled ? (value) {
-        onChanged(value);
-      } : null, // 只在 enabled 为 true 时才允许选择
+      onChanged: (value) {
+        setState(() {
+          _selectedDept = value;
+          _selectedTeam = null;
+          _teams = [];
+          if (value != null) {
+            _fetchTeams(value);
+          }
+        });
+      },
+    );
+  }
+
+  // 团队下拉框
+  Widget _buildTeamDropdown() {
+    return DropdownButtonFormField<String>(
+      decoration: const InputDecoration(
+        labelText: "选择团队",
+        border: OutlineInputBorder(),
+      ),
+      value: _selectedTeam,
+      items: _teams.map((team) {
+        return DropdownMenuItem<String>(
+          value: team["team_name"]?.toString(),
+          child: Text(team["team_name"] ?? ''),
+        );
+      }).toList(),
+      onChanged: (value) {
+        setState(() {
+          _selectedTeam = value;
+        });
+      },
+    );
+  }
+
+  // 角色下拉框
+  Widget _buildRoleDropdown() {
+    return DropdownButtonFormField<int>(
+      decoration: const InputDecoration(
+        labelText: "选择角色",
+        border: OutlineInputBorder(),
+      ),
+      value: _selectedRoleId,
+      items: _roles.map((role) {
+        return DropdownMenuItem<int>(
+          value: role["id"],
+          child: Text(role["role_name"] ?? ''),
+        );
+      }).toList(),
+      onChanged: (value) {
+        setState(() {
+          _selectedRoleId = value;
+        });
+      },
     );
   }
 }
