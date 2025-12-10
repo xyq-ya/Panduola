@@ -2,8 +2,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from werkzeug.utils import secure_filename
-from fpdf import FPDF
-from flask import send_file
 import os
 import time
 import pymysql
@@ -151,14 +149,14 @@ def user_info():
             return jsonify({"code": 500, "msg": "数据库连接失败"})
             
         cursor = conn.cursor()
-        cursor.execute("SELECT name, role_id, team_id, mbti FROM sys_user WHERE id=%s", (user_id,))
+        cursor.execute("SELECT name, role_id, team_id FROM sys_user WHERE id=%s", (user_id,))
         user = cursor.fetchone()
         if not user:
             cursor.close()
             conn.close()
             return jsonify({"code": 2, "msg": "用户不存在"})
 
-        name, role_id, team_id, mbti = user
+        name, role_id, team_id = user
         role_name = None
         team_name = None
         dept_name = None
@@ -189,8 +187,7 @@ def user_info():
             "role_name": role_name,
             "department": dept_name,
             "team": team_name,
-            "team_id": team_id,
-            "mbti": mbti
+            "team_id": team_id  # 新增返回 team_id
         })
 
         return jsonify({
@@ -201,8 +198,7 @@ def user_info():
                 "role_name": role_name,
                 "department": dept_name,
                 "team": team_name,
-                "team_id": team_id,
-                "mbti": mbti
+                "team_id": team_id  # 新增返回 team_id
             }
         })
 
@@ -1084,35 +1080,86 @@ def edit_user():
     orig_mobile = data.get('orig_mobile')
     update_fields = data.get('update_fields') or {}
 
+    print(f"🎯 编辑用户请求:")
+    print(f"  原始名称: {orig_name}")
+    print(f"  原始邮箱: {orig_email}")
+    print(f"  原始手机: {orig_mobile}")
+    print(f"  更新字段: {update_fields}")
+
     # 检查是否提供了用户标识信息
     if not all([orig_name, orig_email, orig_mobile]):
+        print("❌ 缺少用户标识信息")
         return jsonify({"code": 1, "msg": "缺少用户标识信息"})
+
+    # 邮箱格式验证
+    if 'email' in update_fields and update_fields['email']:
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, update_fields['email']):
+            return jsonify({"code": 1, "msg": "邮箱格式不正确"})
+
+    # 手机号格式验证
+    if 'mobile' in update_fields and update_fields['mobile']:
+        mobile = update_fields['mobile']
+        if not mobile.isdigit() or len(mobile) != 11:
+            return jsonify({"code": 1, "msg": "手机号必须是11位数字"})
 
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
 
-        # 查找用户
+        # 查找用户 - 使用原始信息查找
+        print(f"🔍 查询用户: name={orig_name}, email={orig_email}, mobile={orig_mobile}")
         cursor.execute(
-            "SELECT id FROM sys_user WHERE name=%s AND email=%s AND mobile=%s",
+            "SELECT id, name, email, mobile FROM sys_user WHERE name=%s AND email=%s AND mobile=%s",
             (orig_name, orig_email, orig_mobile)
         )
         user = cursor.fetchone()
         if not user:
+            print("❌ 用户不存在")
             cursor.close()
             conn.close()
             return jsonify({"code": 1, "msg": "用户不存在"})
-        user_id = user[0]
+
+        user_id, db_name, db_email, db_mobile = user
+        print(f"✅ 找到用户: id={user_id}, name={db_name}, email={db_email}, mobile={db_mobile}")
+
+        # 检查邮箱是否已被其他用户使用（排除当前用户）
+        if 'email' in update_fields and update_fields['email']:
+            cursor.execute(
+                "SELECT id FROM sys_user WHERE email=%s AND id != %s",
+                (update_fields['email'], user_id)
+            )
+            if cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({"code": 1, "msg": "邮箱已被其他用户使用"})
+
+        # 检查手机号是否已被其他用户使用（排除当前用户）
+        if 'mobile' in update_fields and update_fields['mobile']:
+            cursor.execute(
+                "SELECT id FROM sys_user WHERE mobile=%s AND id != %s",
+                (update_fields['mobile'], user_id)
+            )
+            if cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({"code": 1, "msg": "手机号已被其他用户使用"})
 
         # 记录需要更新的 SQL 部分
         update_sql_parts = ["update_time=%s"]
         update_values = [datetime.now()]
 
-        # 更新普通字段（username, name, password, mobile, email, mbti）
-        for key in ['username', 'name', 'password', 'mobile', 'email', 'mbti']:
-            if key in update_fields and update_fields[key] is not None:
+        # 更新普通字段（username, name, mobile, email）
+        for key in ['username', 'name', 'mobile', 'email']:
+            if key in update_fields and update_fields[key] is not None and update_fields[key] != '':
                 update_sql_parts.append(f"{key}=%s")
                 update_values.append(update_fields[key])
+
+        # 特殊处理密码字段：只有在新密码不为空时才更新
+        if 'password' in update_fields and update_fields['password'] and update_fields['password'] != '':
+            update_sql_parts.append("password=%s")
+            update_values.append(update_fields['password'])
 
         # 更新角色权限（role_id）
         if 'role_id' in update_fields and update_fields['role_id']:
@@ -1129,9 +1176,11 @@ def edit_user():
                 update_values.append(team[0])
 
         # 如果有需要更新的字段，执行更新操作
-        if update_sql_parts:
+        if len(update_sql_parts) > 1:  # 大于1表示除了update_time还有其他字段
             update_values.append(user_id)  # 最后一个是用户ID
             sql = f"UPDATE sys_user SET {', '.join(update_sql_parts)} WHERE id=%s"
+            print(f"🔹 执行SQL: {sql}")
+            print(f"🔹 参数: {update_values}")
             cursor.execute(sql, update_values)
             conn.commit()
             cursor.close()
@@ -1146,7 +1195,9 @@ def edit_user():
         conn.rollback()  # 发生异常时回滚
         cursor.close()
         conn.close()
+        print(f"❌ 修改用户异常: {e}")
         return jsonify({"code": 1, "msg": f"修改失败: {str(e)}"})
+
 # -------------------- 获取任务详情 --------------------
 @bp.route('/get_task_detail', methods=['POST'])
 def get_task_detail():
@@ -1452,7 +1503,6 @@ def upload_work_image():
     except Exception as e:
         print("upload_work_image 异常:", e)
         return jsonify({"code": 1, "msg": f"上传失败: {str(e)}"})
-
 # -------------------- 获取团队成员信息 --------------------
 @bp.route('/get_team_members', methods=['POST'])
 def get_team_members():
@@ -1618,39 +1668,19 @@ def update_user_info():
 
     username = data.get('username')
     password = data.get('password')  # 可存明文或加密
-    name = data.get('name')
+    name = data.get( 'name')
     email = data.get('email')
     mobile = data.get('mobile')
-    mbti = data.get('mbti')  # 新增 MBTI 字段
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            update_fields = []
-            update_values = []
-            if username is not None:
-                update_fields.append('username=%s')
-                update_values.append(username)
-            if password is not None:
-                update_fields.append('password=%s')
-                update_values.append(password)
-            if name is not None:
-                update_fields.append('name=%s')
-                update_values.append(name)
-            if email is not None:
-                update_fields.append('email=%s')
-                update_values.append(email)
-            if mobile is not None:
-                update_fields.append('mobile=%s')
-                update_values.append(mobile)
-            if mbti is not None:
-                update_fields.append('mbti=%s')
-                update_values.append(mbti)
-            if not update_fields:
-                return jsonify({'code': 400, 'msg': '无可更新字段'})
-            sql = f"UPDATE sys_user SET {', '.join(update_fields)} WHERE id=%s"
-            update_values.append(user_id)
-            cursor.execute(sql, tuple(update_values))
+            sql = """
+                UPDATE sys_user
+                SET username=%s, password=%s, name=%s, email=%s, mobile=%s
+                WHERE id=%s
+            """
+            cursor.execute(sql, (username, password, name, email, mobile, user_id))
             conn.commit()
             if cursor.rowcount > 0:
                 return jsonify({'code': 200, 'msg': '更新成功'})
@@ -1764,52 +1794,421 @@ def select_roles():
     except Exception as e:
         print("获取角色列表失败:", e)
         return jsonify({"code": 1, "msg": "获取角色列表失败", "data": []})
-    # -------------------- MBTI PDF报表生成与下载 --------------------
-@bp.route('/generate_mbti_report', methods=['POST'])
-def generate_mbti_report():
-    data = request.get_json() or {}
-    user_id = data.get('user_id')
-    if not user_id:
-        return jsonify({"code": 1, "msg": "缺少用户ID"}), 400
 
+# -------------------- 新增用户接口 --------------------
+@bp.route('/web/add_user', methods=['POST'])
+def add_user():
     try:
+        data = request.get_json() or {}
+
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        name = data.get('name', '').strip()
+        mobile = data.get('mobile', '').strip()
+        email = data.get('email', '').strip()
+        dept_name = data.get('dept_name')
+        team_name = data.get('team_name')
+        role_id = data.get('role_id')
+
+        # 必填字段验证
+        if not all([username, password, name, mobile, email]):
+            return jsonify({"code": 1, "msg": "用户名、密码、姓名、手机、邮箱为必填项"})
+
         conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+
         cursor = conn.cursor()
-        cursor.execute("SELECT name, mbti FROM sys_user WHERE id=%s", (user_id,))
-        user = cursor.fetchone()
-        if not user:
+
+        # 检查用户名是否已存在
+        cursor.execute("SELECT id FROM sys_user WHERE username=%s", (username,))
+        if cursor.fetchone():
             cursor.close()
             conn.close()
-            return jsonify({"code": 2, "msg": "用户不存在"}), 404
-        name, mbti = user
+            return jsonify({"code": 1, "msg": "用户名已存在"})
 
-        # 可扩展：AI分析结果
-        ai_analysis = f"MBTI类型分析：{mbti or '未填写'}"
+        # 插入新用户
+        cursor.execute(
+            """
+            INSERT INTO sys_user
+            (username, password, name, mobile, email, team_id, role_id, create_time, update_time)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """,
+            (username, password, name, mobile, email, None, role_id)
+        )
 
-        # 生成PDF，注册并使用 SourceHanSansSC-Regular 字体支持中文
-        pdf = FPDF()
-        pdf.add_page()
-        font_path = os.path.join(current_app.root_path, 'fonts', 'SourceHanSansSC-Regular.otf')
-        pdf.add_font('SHS', '', font_path, uni=True)
-        pdf.set_font('SHS', '', 16)
-        pdf.cell(0, 10, f"MBTI分析报表", ln=True, align='C')
-        pdf.set_font('SHS', '', 12)
-        pdf.ln(10)
-        pdf.cell(0, 10, f"用户名：{name}", ln=True)
-        pdf.cell(0, 10, f"MBTI类型：{mbti or '未填写'}", ln=True)
-        pdf.ln(10)
-        pdf.multi_cell(0, 10, ai_analysis)
-
-        # 保存临时文件
-        filename = f"mbti_report_{user_id}.pdf"
-        filepath = os.path.join(current_app.root_path, 'static', 'reports', filename)
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        pdf.output(filepath)
+        conn.commit()
         cursor.close()
         conn.close()
 
-        # 提供下载
-        return send_file(filepath, as_attachment=True, download_name=filename)
+        return jsonify({"code": 0, "msg": "用户创建成功"})
+
     except Exception as e:
-        print("生成MBTI报表异常:", e)
-        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"}), 500
+        print("add_user 异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器内部错误: {str(e)}"})
+
+# -------------------- 部门管理接口 --------------------
+@bp.route('/web/departments', methods=['GET'])
+def get_all_departments():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT d.id, d.dept_name, d.manager_id, u.name as manager_name,
+                   d.create_time, d.update_time
+            FROM sys_department d
+            LEFT JOIN sys_user u ON d.manager_id = u.id
+            ORDER BY d.id
+        """)
+        departments = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        dept_list = []
+        for dept in departments:
+            dept_list.append({
+                "id": dept[0],
+                "dept_name": dept[1],
+                "manager_id": dept[2],
+                "manager_name": dept[3] or "未设置",
+                "create_time": dept[4].strftime('%Y-%m-%d %H:%M:%S') if dept[4] else '',
+                "update_time": dept[5].strftime('%Y-%m-%d %H:%M:%S') if dept[5] else ''
+            })
+
+        return jsonify({"code": 0, "data": dept_list})
+
+    except Exception as e:
+        print("获取部门列表异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/departments/add', methods=['POST'])
+def add_department():
+    try:
+        data = request.get_json() or {}
+        dept_name = data.get('dept_name', '').strip()
+        manager_id = data.get('manager_id')
+
+        if not dept_name:
+            return jsonify({"code": 1, "msg": "部门名称不能为空"})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 检查部门名是否已存在
+        cursor.execute("SELECT id FROM sys_department WHERE dept_name=%s", (dept_name,))
+        if cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "部门名称已存在"})
+
+        # 插入新部门
+        cursor.execute(
+            "INSERT INTO sys_department (dept_name, manager_id, create_time, update_time) VALUES (%s, %s, NOW(), NOW())",
+            (dept_name, manager_id)
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "部门创建成功"})
+
+    except Exception as e:
+        print("添加部门异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/departments/update', methods=['POST'])
+def update_department():
+    try:
+        data = request.get_json() or {}
+        dept_id = data.get('id')
+        dept_name = data.get('dept_name', '').strip()
+        manager_id = data.get('manager_id')
+
+        if not dept_id or not dept_name:
+            return jsonify({"code": 1, "msg": "部门ID和名称不能为空"})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 检查部门名是否被其他部门使用
+        cursor.execute("SELECT id FROM sys_department WHERE dept_name=%s AND id != %s", (dept_name, dept_id))
+        if cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "部门名称已被其他部门使用"})
+
+        # 更新部门
+        cursor.execute(
+            "UPDATE sys_department SET dept_name=%s, manager_id=%s, update_time=NOW() WHERE id=%s",
+            (dept_name, manager_id, dept_id)
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "部门更新成功"})
+
+    except Exception as e:
+        print("更新部门异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/departments/delete', methods=['POST'])
+def delete_department():
+    try:
+        data = request.get_json() or {}
+        dept_id = data.get('id')
+
+        if not dept_id:
+            return jsonify({"code": 1, "msg": "部门ID不能为空"})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 检查部门下是否有团队
+        cursor.execute("SELECT COUNT(*) FROM sys_team WHERE department_id=%s", (dept_id,))
+        team_count = cursor.fetchone()[0]
+        if team_count > 0:
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "该部门下还有团队，无法删除"})
+
+        # 删除部门
+        cursor.execute("DELETE FROM sys_department WHERE id=%s", (dept_id,))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "部门删除成功"})
+
+    except Exception as e:
+        print("删除部门异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+# -------------------- 团队管理接口 --------------------
+@bp.route('/web/teams', methods=['GET'])
+def get_all_teams():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT t.id, t.team_name, t.department_id, d.dept_name,
+                   t.leader_id, u.name as leader_name,
+                   t.create_time, t.update_time
+            FROM sys_team t
+            LEFT JOIN sys_department d ON t.department_id = d.id
+            LEFT JOIN sys_user u ON t.leader_id = u.id
+            ORDER BY t.id
+        """)
+        teams = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        team_list = []
+        for team in teams:
+            team_list.append({
+                "id": team[0],
+                "team_name": team[1],
+                "department_id": team[2],
+                "dept_name": team[3] or "未分配",
+                "leader_id": team[4],
+                "leader_name": team[5] or "未设置",
+                "create_time": team[6].strftime('%Y-%m-%d %H:%M:%S') if team[6] else '',
+                "update_time": team[7].strftime('%Y-%m-%d %H:%M:%S') if team[7] else ''
+            })
+
+        print(f"🔍 返回团队数据: {len(team_list)} 条记录")  # 调试信息
+        for team in team_list:
+            print(f"📋 团队: id={team['id']}, name={team['team_name']}, dept={team['dept_name']}")
+
+        return jsonify({"code": 0, "data": team_list})
+
+    except Exception as e:
+        print("获取团队列表异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/teams/add', methods=['POST'])
+def add_team():
+    try:
+        data = request.get_json() or {}
+        team_name = data.get('team_name', '').strip()
+        department_id = data.get('department_id')
+        leader_id = data.get('leader_id')
+
+        if not team_name:
+            return jsonify({"code": 1, "msg": "团队名称不能为空"})
+
+        if not department_id:
+            return jsonify({"code": 1, "msg": "请选择所属部门"})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 检查团队名是否已存在
+        cursor.execute("SELECT id FROM sys_team WHERE team_name=%s", (team_name,))
+        if cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "团队名称已存在"})
+
+        # 插入新团队
+        cursor.execute(
+            "INSERT INTO sys_team (team_name, department_id, leader_id, create_time, update_time) VALUES (%s, %s, %s, NOW(), NOW())",
+            (team_name, department_id, leader_id)
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "团队创建成功"})
+
+    except Exception as e:
+        print("添加团队异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/teams/update', methods=['POST'])
+def update_team():
+    try:
+        data = request.get_json() or {}
+        team_id = data.get('id')
+        team_name = data.get('team_name', '').strip()
+        department_id = data.get('department_id')
+        leader_id = data.get('leader_id')
+
+        if not team_id or not team_name or not department_id:
+            return jsonify({"code": 1, "msg": "团队ID、名称和部门不能为空"})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 检查团队名是否被其他团队使用
+        cursor.execute("SELECT id FROM sys_team WHERE team_name=%s AND id != %s", (team_name, team_id))
+        if cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "团队名称已被其他团队使用"})
+
+        # 更新团队
+        cursor.execute(
+            "UPDATE sys_team SET team_name=%s, department_id=%s, leader_id=%s, update_time=NOW() WHERE id=%s",
+            (team_name, department_id, leader_id, team_id)
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "团队更新成功"})
+
+    except Exception as e:
+        print("更新团队异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/teams/delete', methods=['POST'])
+def delete_team():
+    try:
+        data = request.get_json() or {}
+        team_id = data.get('id')
+
+        if not team_id:
+            return jsonify({"code": 1, "msg": "团队ID不能为空"})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 检查团队下是否有成员
+        cursor.execute("SELECT COUNT(*) FROM sys_user WHERE team_id=%s", (team_id,))
+        user_count = cursor.fetchone()[0]
+        if user_count > 0:
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "该团队下还有成员，无法删除"})
+
+        # 检查是否有任务分配给该团队
+        cursor.execute("SELECT COUNT(*) FROM biz_task WHERE assigned_type='team' AND assigned_id=%s", (team_id,))
+        task_count = cursor.fetchone()[0]
+        if task_count > 0:
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "有任务分配给该团队，无法删除"})
+
+        # 删除团队
+        cursor.execute("DELETE FROM sys_team WHERE id=%s", (team_id,))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "团队删除成功"})
+
+    except Exception as e:
+        print("删除团队异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/teams/change_leader', methods=['POST'])
+def change_team_leader():
+    try:
+        data = request.get_json() or {}
+        team_id = data.get('team_id')
+        new_leader_id = data.get('new_leader_id')
+
+        if not team_id or not new_leader_id:
+            return jsonify({"code": 1, "msg": "团队ID和新团队长ID不能为空"})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 检查新团队长是否属于该团队
+        cursor.execute("SELECT id FROM sys_user WHERE id=%s AND team_id=%s", (new_leader_id, team_id))
+        if not cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 1, "msg": "新团队长不属于该团队"})
+
+        # 更新团队长
+        cursor.execute(
+            "UPDATE sys_team SET leader_id=%s, update_time=NOW() WHERE id=%s",
+            (new_leader_id, team_id)
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "团队长更换成功"})
+
+    except Exception as e:
+        print("更换团队长异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+@bp.route('/web/available_managers', methods=['POST'])
+def get_available_managers():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 获取所有用户，用于选择部门经理
+        cursor.execute("""
+            SELECT id, name, username
+            FROM sys_user
+            WHERE role_id IN (1, 2, 3)  -- 只允许管理员、部门老总、部门经理作为部门经理
+            ORDER BY name
+        """)
+        managers = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        manager_list = [{"id": m[0], "name": m[1], "username": m[2]} for m in managers]
+        return jsonify({"code": 0, "data": manager_list})
+
+    except Exception as e:
+        print("获取可用经理异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})

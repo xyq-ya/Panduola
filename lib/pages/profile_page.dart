@@ -70,6 +70,10 @@ class _ProfilePageState extends State<ProfilePage> {
 
 
   Future<void> _fetchUserInfo(int userId) async {
+    if (userId <= 0) {
+      return;
+    }
+
     try {
       // 使用 UserProvider 生成 URL
       final url = Uri.parse(UserProvider.getApiUrl('user_info'));
@@ -92,7 +96,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
       final data = body['data'];
       print('用户信息数据: $data');
-
       setState(() {
         name = data['username'] ?? '未知用户';
         role = data['role_name'] ?? '未知角色';
@@ -187,6 +190,7 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
+
   Future<void> _fetchUserStats(int userId) async {
     try {
       print('开始获取用户统计数据，userId: $userId');
@@ -208,7 +212,6 @@ class _ProfilePageState extends State<ProfilePage> {
         if (body['code'] == 0) {
           final data = body['data'];
           print('用户统计数据: $data');
-
           double completionRate = 0.0;
           if (data['completion_rate'] != null) {
             if (data['completion_rate'] is String) {
@@ -227,7 +230,6 @@ class _ProfilePageState extends State<ProfilePage> {
               'pendingTasks': _parseInt(data['pending_tasks']) ?? 0,
             };
           });
-
           print('成功处理统计数据: $stats');
 
           if (mounted) {
