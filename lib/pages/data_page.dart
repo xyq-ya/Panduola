@@ -18,6 +18,75 @@ class DataPage extends StatefulWidget {
 }
 
 class _DataPageState extends State<DataPage> {
+    // MBTI输入弹窗
+    Future<void> _editMbti() async {
+      final controller = TextEditingController(text: _mbti);
+      final result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('请输入您的MBTI类型'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: '如：INTJ、ENFP...'),
+            maxLength: 16,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      );
+      if (result != null && result.isNotEmpty && _userId != null) {
+        await _updateMbti(result);
+      }
+    }
+
+    // MBTI更新API
+    Future<void> _updateMbti(String mbti) async {
+      // 先查当前用户信息
+      final infoUrl = Uri.parse(UserProvider.getApiUrl('user_info'));
+      final infoRes = await http.post(
+        infoUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId}),
+      );
+      if (infoRes.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('获取用户信息失败')));
+        return;
+      }
+      final infoData = jsonDecode(infoRes.body);
+      final user = infoData['data'] ?? {};
+      final url = Uri.parse(UserProvider.getApiUrl('update_user_info'));
+      final updateBody = {
+        'user_id': _userId,
+        'username': user['username'] ?? '',
+        'password': '',
+        'name': user['username'] ?? '',
+        'email': '',
+        'mobile': '',
+        'mbti': mbti,
+      };
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(updateBody),
+      );
+      final resData = jsonDecode(res.body);
+      if (res.statusCode == 200 && resData['code'] == 200) {
+        setState(() {
+          _mbti = mbti;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('MBTI已更新')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('MBTI更新失败: ${resData['msg'] ?? ''}')));
+      }
+    }
   int? _userId;
   Future<Map<String, dynamic>>? _aiFutureMap;
   Map<String, int>? _remoteKeywords;
@@ -446,38 +515,30 @@ class _DataPageState extends State<DataPage> {
       return _buildNoDataWidget('暂无分类数据');
     }
     
-    // 确保数据格式正确
     final List<PieChartItem> chartItems = [];
     final colors = [Colors.blue, Colors.orange, Colors.green, Colors.red, Colors.purple, Colors.teal];
-    
     categoryData.forEach((key, value) {
-      final double numericValue = (value is int) ? value.toDouble() : 
-                                (value is double) ? value : 
-                                double.tryParse(value.toString()) ?? 0.0;
-      if (numericValue > 0) {
-        chartItems.add(PieChartItem(
-          label: key,
-          value: numericValue,
-          color: colors[chartItems.length % colors.length]
-        ));
-      }
+      final double numericValue = (value is int) ? value.toDouble() :
+          (value is double) ? value :
+          double.tryParse(value.toString()) ?? 0.0;
+      chartItems.add(PieChartItem(
+        label: key,
+        value: numericValue,
+        color: colors[chartItems.length % colors.length],
+      ));
     });
-    
-    if (chartItems.isEmpty) {
-      return _buildNoDataWidget('分类数据为空');
-    }
-    
+    final double total = chartItems.fold(0.0, (s, i) => s + i.value);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white, 
-        borderRadius: BorderRadius.circular(12)
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         children: [
           const Text(
-            '任务分类耗时占比', 
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+            '任务分类耗时占比',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 16),
           SizedBox(
@@ -493,32 +554,35 @@ class _DataPageState extends State<DataPage> {
             child: Wrap(
               spacing: 12,
               runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: chartItems.map((item) {
-                return Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      color: item.color,
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        '${item.label} (${item.value.toInt()}%)',
-                        style: const TextStyle(fontSize: 12),
-                        overflow: TextOverflow.ellipsis,
+              children: [
+                ...categoryData.entries.map((entry) {
+                  final double numericValue = (entry.value is int) ? entry.value.toDouble() :
+                      (entry.value is double) ? entry.value :
+                      double.tryParse(entry.value.toString()) ?? 0.0;
+                  final percent = total > 0 && numericValue > 0 ? (numericValue / total * 100).toStringAsFixed(1) : '0.0';
+                  final color = numericValue > 0
+                      ? colors[chartItems.indexWhere((i) => i.label == entry.key) % colors.length]
+                      : Colors.grey.shade300;
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        color: color,
+                        margin: const EdgeInsets.only(right: 4),
                       ),
-                    ),
-                  ],
-                );
-              }).toList(),
+                      Text('${entry.key} $percent%'),
+                    ],
+                  );
+                }).toList(),
+              ],
             ),
           ),
         ],
       ),
     );
+              // ...existing code...
   }
 
   // 柱状图构建方法 - 修复数据格式问题
@@ -850,34 +914,37 @@ class _DataPageState extends State<DataPage> {
                                 color: Colors.purple[50],
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Text(
-                                'MBTI: ${_mbti.isNotEmpty ? _mbti : '未填写'}',
-                                style: TextStyle(
-                                  color: Colors.purple[700],
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
+                              child: InkWell(
+                                onTap: _editMbti,
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      'MBTI: ${_mbti.isNotEmpty ? _mbti : '未填写'}',
+                                      style: TextStyle(
+                                        color: Colors.purple[700],
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.edit, size: 14, color: Colors.purple)
+                                  ],
                                 ),
                               ),
                             ),
                           ],
                         ),
-                        Row(
-                          children: [
-                            Text('来源: $_aiProvider', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                            const SizedBox(width: 8),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                _loadDashboardData();
-                                _refreshAi();
-                                if (_userId != null) _fetchMbti(_userId!);
-                              },
-                              icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('刷新数据'),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                              ),
-                            )
-                          ],
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            _loadDashboardData();
+                            _refreshAi();
+                            if (_userId != null) _fetchMbti(_userId!);
+                          },
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('刷新数据'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          ),
                         ),
                       ],
                     ),
@@ -1107,23 +1174,31 @@ class _PiePainter extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..strokeWidth = 2;
-    
+
+    final padding = 10.0;
+    final radius = (size.width < size.height
+        ? size.width / 2
+        : size.height / 2) - padding;
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.shortestSide / 2 - 10;
     final rect = Rect.fromCircle(center: center, radius: radius);
-    
+
     final total = items.fold(0.0, (sum, item) => sum + item.value);
-    if (total == 0) return;
-    
+    if (items.isEmpty) {
+      // 空数据时绘制灰色圆环
+      paint.color = Colors.grey.shade300;
+      canvas.drawArc(rect, 0, 2 * pi, true, paint);
+      return;
+    }
+
     double startAngle = -pi / 2; // 从12点方向开始
-    
-    for (final item in items) {
-      final sweepAngle = (item.value / total) * 2 * pi;
-      
-      paint.color = item.color;
-      canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
-      
-      startAngle += sweepAngle;
+    for (int i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item.value > 0 && total > 0) {
+        final sweepAngle = (item.value / total) * 2 * pi;
+        paint.color = item.color;
+        canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
+        startAngle += sweepAngle;
+      }
     }
   }
 
