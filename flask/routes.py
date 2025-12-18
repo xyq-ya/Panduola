@@ -1,10 +1,12 @@
 # routes.py
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, send_file
 from datetime import datetime
 from werkzeug.utils import secure_filename
 import os
 import time
 import pymysql
+from fpdf import FPDF
+import io
 bp = Blueprint('auth', __name__)
 
 def get_db_connection():
@@ -149,14 +151,14 @@ def user_info():
             return jsonify({"code": 500, "msg": "数据库连接失败"})
             
         cursor = conn.cursor()
-        cursor.execute("SELECT name, role_id, team_id FROM sys_user WHERE id=%s", (user_id,))
+        cursor.execute("SELECT name, role_id, team_id, mbti FROM sys_user WHERE id=%s", (user_id,))
         user = cursor.fetchone()
         if not user:
             cursor.close()
             conn.close()
             return jsonify({"code": 2, "msg": "用户不存在"})
 
-        name, role_id, team_id = user
+        name, role_id, team_id, mbti = user
         role_name = None
         team_name = None
         dept_name = None
@@ -187,7 +189,8 @@ def user_info():
             "role_name": role_name,
             "department": dept_name,
             "team": team_name,
-            "team_id": team_id  # 新增返回 team_id
+            "team_id": team_id,
+            "mbti": mbti
         })
 
         return jsonify({
@@ -198,7 +201,8 @@ def user_info():
                 "role_name": role_name,
                 "department": dept_name,
                 "team": team_name,
-                "team_id": team_id  # 新增返回 team_id
+                "team_id": team_id,
+                "mbti": mbti
             }
         })
 
@@ -1666,21 +1670,21 @@ def update_user_info():
     if not user_id:
         return jsonify({'code': 400, 'msg': 'user_id缺失'})
 
-    username = data.get('username')
-    password = data.get('password')  # 可存明文或加密
-    name = data.get( 'name')
-    email = data.get('email')
-    mobile = data.get('mobile')
-
+    # 只更新传入字段
+    fields = []
+    values = []
+    for key in ['username', 'password', 'name', 'email', 'mobile', 'mbti']:
+        if key in data:
+            fields.append(f"{key}=%s")
+            values.append(data[key])
+    if not fields:
+        return jsonify({'code': 400, 'msg': '无可更新字段'})
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            sql = """
-                UPDATE sys_user
-                SET username=%s, password=%s, name=%s, email=%s, mobile=%s
-                WHERE id=%s
-            """
-            cursor.execute(sql, (username, password, name, email, mobile, user_id))
+            sql = f"UPDATE sys_user SET {', '.join(fields)} WHERE id=%s"
+            values.append(user_id)
+            cursor.execute(sql, tuple(values))
             conn.commit()
             if cursor.rowcount > 0:
                 return jsonify({'code': 200, 'msg': '更新成功'})
@@ -2212,3 +2216,36 @@ def get_available_managers():
     except Exception as e:
         print("获取可用经理异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
+
+# -------------------- MBTI PDF报告生成 --------------------
+@bp.route('/generate_mbti_report', methods=['POST'])
+def generate_mbti_report():
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'code': 400, 'msg': 'user_id缺失'}), 400
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT name, mbti FROM sys_user WHERE id=%s", (user_id,))
+            user = cursor.fetchone()
+            if not user:
+                return jsonify({'code': 404, 'msg': '用户不存在'}), 404
+            name, mbti = user
+    finally:
+        conn.close()
+    # 生成PDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.add_font('SimHei', '', fname='C:/Windows/Fonts/simhei.ttf', uni=True)
+    pdf.set_font('SimHei', '', 16)
+    pdf.cell(0, 10, f"MBTI分析报告", ln=True, align='C')
+    pdf.set_font('SimHei', '', 12)
+    pdf.cell(0, 10, f"姓名: {name}", ln=True)
+    pdf.cell(0, 10, f"MBTI类型: {mbti if mbti else '未填写'}", ln=True)
+    pdf.cell(0, 10, f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True)
+    pdf.cell(0, 10, "本报告仅供参考。", ln=True)
+    pdf_bytes = pdf.output(dest='S').encode('latin1')
+    pdf_output = io.BytesIO(pdf_bytes)
+    pdf_output.seek(0)
+    return send_file(pdf_output, as_attachment=True, download_name=f"mbti_report_{user_id}.pdf", mimetype='application/pdf')

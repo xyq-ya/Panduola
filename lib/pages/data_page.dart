@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 import 'dart:async';
 import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import '../providers/user_provider.dart';
 import '../services/ai_analysis.dart';
 import '../services/data_service.dart';
@@ -14,17 +18,110 @@ class DataPage extends StatefulWidget {
 }
 
 class _DataPageState extends State<DataPage> {
+    // MBTI输入弹窗
+    Future<void> _editMbti() async {
+      final controller = TextEditingController(text: _mbti);
+      final result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('请输入您的MBTI类型'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: '如：INTJ、ENFP...'),
+            maxLength: 16,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      );
+      if (result != null && result.isNotEmpty && _userId != null) {
+        await _updateMbti(result);
+      }
+    }
+
+    // MBTI更新API
+    Future<void> _updateMbti(String mbti) async {
+      // 先查当前用户信息
+      final infoUrl = Uri.parse(UserProvider.getApiUrl('user_info'));
+      final infoRes = await http.post(
+        infoUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId}),
+      );
+      if (infoRes.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('获取用户信息失败')));
+        return;
+      }
+      final infoData = jsonDecode(infoRes.body);
+      final user = infoData['data'] ?? {};
+      final url = Uri.parse(UserProvider.getApiUrl('update_user_info'));
+      final updateBody = {
+        'user_id': _userId,
+        'username': user['username'] ?? '',
+        'password': '',
+        'name': user['username'] ?? '',
+        'email': '',
+        'mobile': '',
+        'mbti': mbti,
+      };
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(updateBody),
+      );
+      final resData = jsonDecode(res.body);
+      if (res.statusCode == 200 && resData['code'] == 200) {
+        setState(() {
+          _mbti = mbti;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('MBTI已更新')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('MBTI更新失败: ${resData['msg'] ?? ''}')));
+      }
+    }
   int? _userId;
   Future<Map<String, dynamic>>? _aiFutureMap;
   Map<String, int>? _remoteKeywords;
   Map<String, double>? _remoteScores;
   String _aiProvider = 'local';
 
+  // 新增：MBTI 字段
+  String _mbti = '';
+
   // 数据库数据状态
   Map<String, dynamic>? _dashboardData;
   bool _isLoading = false;
   String _errorMessage = '';
   bool _hasInitialLoad = false;
+
+  Future<void> _fetchMbti(int userId) async {
+    try {
+      final url = Uri.parse(UserProvider.getApiUrl('user_info'));
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId}),
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['code'] == 0 && body['data'] != null) {
+          setState(() {
+            _mbti = body['data']['mbti']?.toString() ?? '';
+          });
+        }
+      }
+    } catch (e) {
+      // 忽略异常
+    }
+  }
 
   // 从数据库加载数据的方法
   Future<void> _loadDashboardData() async {
@@ -418,38 +515,30 @@ class _DataPageState extends State<DataPage> {
       return _buildNoDataWidget('暂无分类数据');
     }
     
-    // 确保数据格式正确
     final List<PieChartItem> chartItems = [];
     final colors = [Colors.blue, Colors.orange, Colors.green, Colors.red, Colors.purple, Colors.teal];
-    
     categoryData.forEach((key, value) {
-      final double numericValue = (value is int) ? value.toDouble() : 
-                                (value is double) ? value : 
-                                double.tryParse(value.toString()) ?? 0.0;
-      if (numericValue > 0) {
-        chartItems.add(PieChartItem(
-          label: key,
-          value: numericValue,
-          color: colors[chartItems.length % colors.length]
-        ));
-      }
+      final double numericValue = (value is int) ? value.toDouble() :
+          (value is double) ? value :
+          double.tryParse(value.toString()) ?? 0.0;
+      chartItems.add(PieChartItem(
+        label: key,
+        value: numericValue,
+        color: colors[chartItems.length % colors.length],
+      ));
     });
-    
-    if (chartItems.isEmpty) {
-      return _buildNoDataWidget('分类数据为空');
-    }
-    
+    final double total = chartItems.fold(0.0, (s, i) => s + i.value);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white, 
-        borderRadius: BorderRadius.circular(12)
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         children: [
           const Text(
-            '任务分类耗时占比', 
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+            '任务分类耗时占比',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 16),
           SizedBox(
@@ -465,32 +554,35 @@ class _DataPageState extends State<DataPage> {
             child: Wrap(
               spacing: 12,
               runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: chartItems.map((item) {
-                return Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      color: item.color,
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        '${item.label} (${item.value.toInt()}%)',
-                        style: const TextStyle(fontSize: 12),
-                        overflow: TextOverflow.ellipsis,
+              children: [
+                ...categoryData.entries.map((entry) {
+                  final double numericValue = (entry.value is int) ? entry.value.toDouble() :
+                      (entry.value is double) ? entry.value :
+                      double.tryParse(entry.value.toString()) ?? 0.0;
+                  final percent = total > 0 && numericValue > 0 ? (numericValue / total * 100).toStringAsFixed(1) : '0.0';
+                  final color = numericValue > 0
+                      ? colors[chartItems.indexWhere((i) => i.label == entry.key) % colors.length]
+                      : Colors.grey.shade300;
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        color: color,
+                        margin: const EdgeInsets.only(right: 4),
                       ),
-                    ),
-                  ],
-                );
-              }).toList(),
+                      Text('${entry.key} $percent%'),
+                    ],
+                  );
+                }).toList(),
+              ],
             ),
           ),
         ],
       ),
     );
+              // ...existing code...
   }
 
   // 柱状图构建方法 - 修复数据格式问题
@@ -515,18 +607,25 @@ class _DataPageState extends State<DataPage> {
     for (var item in trendData) {
       if (item is Map<String, dynamic>) {
         final date = item['date']?.toString() ?? '';
-        final count = (item['count'] is int) ? item['count'] as int : 
-                     (item['count'] is double) ? (item['count'] as double).toInt() :
-                     int.tryParse(item['count'].toString()) ?? 0;
-        
-        if (date.isNotEmpty && count > 0) {
-          barItems.add(BarChartItem(date: date, value: count.toDouble()));
+        var countRaw = item['count'];
+        double? count;
+        if (countRaw == null) {
+          count = null;
+        } else if (countRaw is int || countRaw is double) {
+          count = countRaw.toDouble();
+        } else if (countRaw is String) {
+          count = double.tryParse(countRaw);
+        } else {
+          count = double.tryParse(countRaw.toString());
+        }
+        if (date.isNotEmpty && count != null && count > 0) {
+          barItems.add(BarChartItem(date: date, value: count));
         }
       }
     }
-    
+    // 如果所有 count 都为 0 或解析失败，显示友好提示
     if (barItems.isEmpty) {
-      return _buildNoDataWidget('趋势数据格式错误');
+      return _buildNoDataWidget('暂无有效趋势数据');
     }
     
     // 限制显示数量，防止超距
@@ -790,7 +889,7 @@ class _DataPageState extends State<DataPage> {
                 ],
               ),
 
-              // AI分析卡片
+              // AI分析卡片 + MBTI展示
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -805,23 +904,47 @@ class _DataPageState extends State<DataPage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         Row(
                           children: [
-                            Text('来源: $_aiProvider', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                            const SizedBox(width: 8),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                _loadDashboardData();
-                                _refreshAi();
-                              },
-                              icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('刷新数据'),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            const Text('AI 智能分析', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.purple[50],
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                            )
+                              child: InkWell(
+                                onTap: _editMbti,
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      'MBTI: ${_mbti.isNotEmpty ? _mbti : '未填写'}',
+                                      style: TextStyle(
+                                        color: Colors.purple[700],
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.edit, size: 14, color: Colors.purple)
+                                  ],
+                                ),
+                              ),
+                            ),
                           ],
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            _loadDashboardData();
+                            _refreshAi();
+                            if (_userId != null) _fetchMbti(_userId!);
+                          },
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('刷新数据'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          ),
                         ),
                       ],
                     ),
@@ -922,6 +1045,90 @@ class _DataPageState extends State<DataPage> {
                         ],
                       ),
                     ),
+                    // MBTI PDF报表下载按钮
+                    const SizedBox(height: 16),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.picture_as_pdf, size: 18),
+                        label: const Text('下载MBTI分析报表'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                        ),
+                        onPressed: _userId == null ? null : () async {
+                          final url = Uri.parse('http://10.0.2.2:5000/api/generate_mbti_report');
+                          final res = await http.post(
+                            url,
+                            headers: {'Content-Type': 'application/json'},
+                            body: jsonEncode({'user_id': _userId}),
+                          );
+                          if (res.statusCode == 200) {
+                            final bytes = res.bodyBytes;
+                            final filename = 'mbti_report_${_userId}.pdf';
+                            try {
+                              String desktopPath = '';
+                              if (Platform.isWindows) {
+                                desktopPath = Platform.environment['USERPROFILE'] != null
+                                  ? Platform.environment['USERPROFILE']! + '\\Desktop'
+                                  : '';
+                              } else {
+                                final dir = await getDownloadsDirectory();
+                                desktopPath = dir?.path ?? '';
+                              }
+                              if (desktopPath.isNotEmpty) {
+                                final file = File('$desktopPath\\$filename');
+                                await file.writeAsBytes(bytes);
+                                showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('下载成功'),
+                                    content: Text('MBTI分析报表已保存到桌面：$filename'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(ctx).pop(),
+                                        child: const Text('确定'),
+                                      )
+                                    ],
+                                  ),
+                                );
+                              } else {
+                                throw Exception('无法获取桌面路径');
+                              }
+                            } catch (e) {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('下载成功'),
+                                  content: const Text('MBTI分析报表已生成，请在PC端保存。'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(ctx).pop(),
+                                      child: const Text('确定'),
+                                    )
+                                  ],
+                                ),
+                              );
+                            }
+                          } else {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('下载失败'),
+                                content: Text('服务器返回错误: ${res.statusCode}'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(ctx).pop(),
+                                    child: const Text('确定'),
+                                  )
+                                ],
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -967,23 +1174,31 @@ class _PiePainter extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..strokeWidth = 2;
-    
+
+    final padding = 10.0;
+    final radius = (size.width < size.height
+        ? size.width / 2
+        : size.height / 2) - padding;
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.shortestSide / 2 - 10;
     final rect = Rect.fromCircle(center: center, radius: radius);
-    
+
     final total = items.fold(0.0, (sum, item) => sum + item.value);
-    if (total == 0) return;
-    
+    if (items.isEmpty) {
+      // 空数据时绘制灰色圆环
+      paint.color = Colors.grey.shade300;
+      canvas.drawArc(rect, 0, 2 * pi, true, paint);
+      return;
+    }
+
     double startAngle = -pi / 2; // 从12点方向开始
-    
-    for (final item in items) {
-      final sweepAngle = (item.value / total) * 2 * pi;
-      
-      paint.color = item.color;
-      canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
-      
-      startAngle += sweepAngle;
+    for (int i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item.value > 0 && total > 0) {
+        final sweepAngle = (item.value / total) * 2 * pi;
+        paint.color = item.color;
+        canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
+        startAngle += sweepAngle;
+      }
     }
   }
 
