@@ -1,14 +1,10 @@
-# config.py
-# Prefer environment variables for local/CI configuration. Defaults provided for
-# quick local development but DO NOT use these credentials in production.
 import os
 
 DB_HOST = os.getenv('DB_HOST', 'localhost')
 DB_USER = os.getenv('DB_USER', 'root')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'Aa12332166@')  # change locally or use env var
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'fenghaoyu1002')  # change locally or use env var
 DB_NAME = os.getenv('DB_NAME', 'task_management_system')
 DB_CHARSET = os.getenv('DB_CHARSET', 'utf8mb4')
-
 
 
 # Volcengine Ark specific defaults
@@ -19,3 +15,4 @@ ARK_BASE_URL = os.getenv('ARK_BASE_URL', 'https://ark.cn-beijing.volces.com/api/
 # Generic external AI endpoint/credentials fallback (used when Ark SDK not available)
 AI_API_URL = os.getenv('AI_API_URL')
 AI_API_KEY = os.getenv('AI_API_KEY')
+

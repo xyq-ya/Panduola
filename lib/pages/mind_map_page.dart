@@ -30,6 +30,12 @@ class _MindMapPageState extends State<MindMapPage> {
   List<Map<String, dynamic>> personalTopItems = [];
   List<Map<String, dynamic>> personalLogs = [];
 
+  // 选中用于展示的数据
+  List<String> selectedCompanyMatters = [];
+  List<Map<String, dynamic>> selectedCompanyDispatched = [];
+  List<Map<String, dynamic>> selectedPersonalTopItems = [];
+  List<Map<String, dynamic>> selectedPersonalLogs = [];
+
   bool loading = true;
 
   @override
@@ -137,6 +143,12 @@ class _MindMapPageState extends State<MindMapPage> {
 
   Future<void> _loadMindMapData() async {
     try {
+      // 每次加载前，清空已选择数据，确保根据最新数据刷新展示
+      selectedCompanyMatters = [];
+      selectedCompanyDispatched = [];
+      selectedPersonalTopItems = [];
+      selectedPersonalLogs = [];
+
       // 公司十大事项
       var apiUrl = UserProvider.getApiUrl('company_top_matters');
       final resMatters = await http.get(Uri.parse(apiUrl));
@@ -187,6 +199,12 @@ class _MindMapPageState extends State<MindMapPage> {
           }
         }
       }
+
+      // 默认全部展示（用户还未重新勾选时）
+      selectedCompanyMatters = List<String>.from(companyMatters);
+      selectedCompanyDispatched = List<Map<String, dynamic>>.from(companyDispatched);
+      selectedPersonalTopItems = List<Map<String, dynamic>>.from(personalTopItems);
+      selectedPersonalLogs = List<Map<String, dynamic>>.from(personalLogs);
     } catch (e) {
       print('加载导图数据错误: $e');
     } finally {
@@ -230,6 +248,108 @@ class _MindMapPageState extends State<MindMapPage> {
   bool get canSelectDepartment => _roleId != null && _roleId! <= 2;
   bool get canSelectTeam => _roleId != null && (_roleId! <= 3 || _roleId! == 4);
   bool get canSelectEmployee => _roleId != null && _roleId! <= 4;
+  bool get canEditCompanyBlocks => _roleId != null && _roleId! <= 2;
+
+  // 通用弹窗选择器
+  void _openSelectionDialog<T>({
+    required String title,
+    required List<T> sourceList,
+    required List<T> currentSelected,
+    required bool canConfirm,
+    required void Function(List<T>) onConfirm,
+    required String Function(T) displayText,
+  }) {
+    // 即使列表为空也允许弹出窗格（只是内容为空）
+    final List<T> initial =
+        currentSelected.isNotEmpty ? List<T>.from(currentSelected) : List<T>.from(sourceList);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: StatefulBuilder(
+            builder: (context, setStateDialog) {
+              final selected = initial;
+              return SizedBox(
+                width: MediaQuery.of(context).size.width * 0.9,
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: Column(
+                  children: [
+                    // 标题 + 关闭
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    // 内容列表
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: sourceList.length,
+                        itemBuilder: (context, index) {
+                          final item = sourceList[index];
+                          final text = displayText(item);
+                          final bool isChecked = selected.contains(item);
+                          return CheckboxListTile(
+                            title: Text(
+                              text,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            value: isChecked,
+                            onChanged: (v) {
+                              setStateDialog(() {
+                                if (v == true) {
+                                  if (!selected.contains(item)) {
+                                    selected.add(item);
+                                  }
+                                } else {
+                                  selected.remove(item);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: canConfirm
+                              ? () {
+                                  onConfirm(List<T>.from(selected));
+                                  Navigator.of(context).pop();
+                                }
+                              : null,
+                          child: Text(canConfirm ? '确定' : '没有权限选择展示'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildDropdown({
     required String label,
@@ -373,21 +493,44 @@ class _MindMapPageState extends State<MindMapPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  '公司十大事项',
-                                  style: TextStyle(
+                                GestureDetector(
+                                  onTap: () {
+                                    _openSelectionDialog<String>(
+                                      title: '选择公司十大事项',
+                                      sourceList: companyMatters,
+                                      currentSelected: selectedCompanyMatters,
+                                      canConfirm: canEditCompanyBlocks,
+                                      onConfirm: (list) {
+                                        setState(() {
+                                          selectedCompanyMatters = list;
+                                        });
+                                      },
+                                      displayText: (v) => v,
+                                    );
+                                  },
+                                  child: const Text(
+                                    '公司十大事项',
+                                    style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFF1E3A8A)),
+                                      color: Color(0xFF1E3A8A),
+                                    ),
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 Expanded(
                                   child: Scrollbar(
                                     child: ListView.separated(
-                                      itemCount: companyMatters.length,
+                                      itemCount: (selectedCompanyMatters.isNotEmpty
+                                              ? selectedCompanyMatters
+                                              : companyMatters)
+                                          .length,
                                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                                       itemBuilder: (context, index) {
-                                        final title = companyMatters[index];
+                                        final list = selectedCompanyMatters.isNotEmpty
+                                            ? selectedCompanyMatters
+                                            : companyMatters;
+                                        final title = list[index];
                                         // 用不同颜色做区分
                                         final color = index % 3 == 0
                                             ? Colors.redAccent
@@ -416,21 +559,44 @@ class _MindMapPageState extends State<MindMapPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  '公司十大派发任务',
-                                  style: TextStyle(
+                                GestureDetector(
+                                  onTap: () {
+                                    _openSelectionDialog<Map<String, dynamic>>(
+                                      title: '选择公司十大派发任务',
+                                      sourceList: companyDispatched,
+                                      currentSelected: selectedCompanyDispatched,
+                                      canConfirm: canEditCompanyBlocks,
+                                      onConfirm: (list) {
+                                        setState(() {
+                                          selectedCompanyDispatched = list;
+                                        });
+                                      },
+                                      displayText: (item) => (item['title'] ?? '').toString(),
+                                    );
+                                  },
+                                  child: const Text(
+                                    '公司十大派发任务',
+                                    style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFFEC6A1E)),
+                                      color: Color(0xFFEC6A1E),
+                                    ),
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 Expanded(
                                   child: Scrollbar(
                                     child: ListView.separated(
-                                      itemCount: companyDispatched.length,
+                                      itemCount: (selectedCompanyDispatched.isNotEmpty
+                                              ? selectedCompanyDispatched
+                                              : companyDispatched)
+                                          .length,
                                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                                       itemBuilder: (context, index) {
-                                        final item = companyDispatched[index];
+                                        final list = selectedCompanyDispatched.isNotEmpty
+                                            ? selectedCompanyDispatched
+                                            : companyDispatched;
+                                        final item = list[index];
                                         final status = (item['status'] ?? '').toString();
                                         final isDone = status.contains('done') || status == 'completed' || status == '已完成';
                                         final bg = isDone ? Colors.green.shade100 : Colors.orange.shade100;
@@ -456,21 +622,44 @@ class _MindMapPageState extends State<MindMapPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  '个人十大展示项',
-                                  style: TextStyle(
+                                GestureDetector(
+                                  onTap: () {
+                                    _openSelectionDialog<Map<String, dynamic>>(
+                                      title: '选择个人十大展示项',
+                                      sourceList: personalTopItems,
+                                      currentSelected: selectedPersonalTopItems,
+                                      canConfirm: true,
+                                      onConfirm: (list) {
+                                        setState(() {
+                                          selectedPersonalTopItems = list;
+                                        });
+                                      },
+                                      displayText: (item) => (item['title'] ?? '').toString(),
+                                    );
+                                  },
+                                  child: const Text(
+                                    '个人十大展示项',
+                                    style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFF6D28D9)),
+                                      color: Color(0xFF6D28D9),
+                                    ),
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 Expanded(
                                   child: Scrollbar(
                                     child: ListView.separated(
-                                      itemCount: personalTopItems.length,
+                                      itemCount: (selectedPersonalTopItems.isNotEmpty
+                                              ? selectedPersonalTopItems
+                                              : personalTopItems)
+                                          .length,
                                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                                       itemBuilder: (context, index) {
-                                        final item = personalTopItems[index];
+                                        final list = selectedPersonalTopItems.isNotEmpty
+                                            ? selectedPersonalTopItems
+                                            : personalTopItems;
+                                        final item = list[index];
                                         final title = (item['title'] ?? '').toString();
                                         final end = (item['end_time'] ?? '').toString();
                                         final status = (item['status'] ?? '').toString();
@@ -493,21 +682,45 @@ class _MindMapPageState extends State<MindMapPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  '个人日志',
-                                  style: TextStyle(
+                                GestureDetector(
+                                  onTap: () {
+                                    _openSelectionDialog<Map<String, dynamic>>(
+                                      title: '选择个人日志',
+                                      sourceList: personalLogs,
+                                      currentSelected: selectedPersonalLogs,
+                                      canConfirm: true,
+                                      onConfirm: (list) {
+                                        setState(() {
+                                          selectedPersonalLogs = list;
+                                        });
+                                      },
+                                      displayText: (log) =>
+                                          (log['content'] ?? log['title'] ?? '').toString(),
+                                    );
+                                  },
+                                  child: const Text(
+                                    '个人日志',
+                                    style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFFEC4899)),
+                                      color: Color(0xFFEC4899),
+                                    ),
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 Expanded(
                                   child: Scrollbar(
                                     child: ListView.separated(
-                                      itemCount: personalLogs.length,
+                                      itemCount: (selectedPersonalLogs.isNotEmpty
+                                              ? selectedPersonalLogs
+                                              : personalLogs)
+                                          .length,
                                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                                       itemBuilder: (context, index) {
-                                        final log = personalLogs[index];
+                                        final list = selectedPersonalLogs.isNotEmpty
+                                            ? selectedPersonalLogs
+                                            : personalLogs;
+                                        final log = list[index];
                                         return _logItem(
                                           (log['username'] ?? '').toString(),
                                           (log['content'] ?? '').toString(),

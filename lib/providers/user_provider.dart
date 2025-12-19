@@ -4,7 +4,8 @@ class UserProvider extends ChangeNotifier {
   int? _id;      // 存储用户 id
   int? get id => _id;
 
-  static const String baseUrl = 'http://[2409:8900:1ac0:5b95:190f:ab8b:a7d0:2728]:5000';
+  // 开发环境：Android 模拟器访问本机后端应使用 10.0.2.2
+  static const String baseUrl = 'http://10.0.2.2:5000';
   
   void setId(int id) {
     _id = id;

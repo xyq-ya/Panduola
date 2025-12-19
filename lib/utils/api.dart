@@ -9,12 +9,14 @@ class Api {
     if (envBase.isNotEmpty) return envBase;
 
     if (kIsWeb) {
-      // Web 端直接指向本机 Flask 服务，避免使用 origin(8080)
-      return 'http://[2409:8900:1ac0:5b95:190f:ab8b:a7d0:2728]:5000';
+      // Web 端直接使用当前局域网 IP
+      return 'http://192.168.128.39:5000';
     }
     try {
-      if (Platform.isAndroid) return 'http://[2409:8900:1ac0:5b95:190f:ab8b:a7d0:2728]:5000';
-      return 'http://[2409:8900:1ac0:5b95:190f:ab8b:a7d0:2728]:5000';
+      // Android 模拟器访问宿主机要使用 10.0.2.2
+      if (Platform.isAndroid) return 'http://10.0.2.2:5000';
+      // 其他平台（Windows/macOS 等）继续使用局域网 IP
+      return 'http://192.168.128.39:5000';
     } catch (e) {
       // 如果无法访问 Platform（安全回退）
       return 'http://10.0.2.2:5000';
