@@ -2,7 +2,7 @@ import os
 
 DB_HOST = os.getenv('DB_HOST', 'localhost')
 DB_USER = os.getenv('DB_USER', 'root')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'yang20050219')  # change locally or use env var
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'fenghaoyu1002')  # change locally or use env var
 DB_NAME = os.getenv('DB_NAME', 'task_management_system')
 DB_CHARSET = os.getenv('DB_CHARSET', 'utf8mb4')
 
