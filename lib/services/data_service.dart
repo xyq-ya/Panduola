@@ -5,8 +5,8 @@ import 'package:http/http.dart' as http;
 class DataService {
   static Future<Map<String, dynamic>> getDashboardStats(int userId, {int days = 7}) async {
     try {
-      // 开发环境：Android 模拟器访问本机后端应使用 10.0.2.2
-      const String requestUrl = 'http://10.0.2.2:5000/api/stats_dashboard';
+      // 直接硬编码完整URL
+      const String requestUrl = 'http://192.168.128.39:5000/api/stats_dashboard';
       
       print('🚀 === 开始API请求 ===');
       print('🎯 目标URL: $requestUrl');
