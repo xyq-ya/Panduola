@@ -6,12 +6,12 @@ class DataService {
   static Future<Map<String, dynamic>> getDashboardStats(int userId, {int days = 7}) async {
     try {
       // 直接硬编码完整URL
-      const String requestUrl = 'http://192.168.128.39:5000/api/stats_dashboard';
-      
+      const String requestUrl = 'http://10.60.246.2:5000/api/stats_dashboard';
+
       print('🚀 === 开始API请求 ===');
       print('🎯 目标URL: $requestUrl');
       print('📋 请求参数: user_id=$userId, days=$days');
-      
+
       final response = await http.post(
         Uri.parse(requestUrl),
         headers: {'Content-Type': 'application/json'},
@@ -23,11 +23,11 @@ class DataService {
 
       print('📡 响应状态: ${response.statusCode}');
       print('📝 响应体: ${response.body}');
-      
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         print('✅ API响应数据: $data');
-        
+
         if (data['code'] == 0) {
           return data['data'] ?? {};
         } else {
