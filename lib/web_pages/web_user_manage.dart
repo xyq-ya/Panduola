@@ -157,7 +157,7 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
     });
 
     print("🔹 保存原始信息: name=$_originalName, email=$_originalEmail, mobile=$_originalMobile");
-
+    
     // 更新 controllers 显示用户信息 - 密码字段始终为空
     _controllers['username']!.text = user['username'] ?? '';
     _controllers['password']!.text = ''; // 密码字段始终为空
@@ -182,7 +182,7 @@ class _WebUserManagePageState extends State<WebUserManagePage> {
 
       if (data["code"] == 0 && data["data"] != null) {
         final u = data["data"];
-
+        _controllers['username']!.text = u['username']!;
         // 设置部门、团队、角色信息
         final dept = u["department"];
         final team = u["team_name"];

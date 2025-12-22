@@ -1673,7 +1673,7 @@ def update_user_info():
     # 只更新传入字段
     fields = []
     values = []
-    for key in ['username', 'password', 'name', 'email', 'mobile', 'mbti']:
+    for key in ['username', 'password', 'name', 'email', 'mobile']:
         if key in data:
             fields.append(f"{key}=%s")
             values.append(data[key])
@@ -1785,7 +1785,7 @@ def get_user_messages():
     except Exception as e:
         print("get_user_messages 异常:", e)
         return jsonify({"code": 500, "msg": f"服务器错误: {str(e)}"})
-@bp.route('web/select_roles', methods=['POST'])
+@bp.route('/web/select_roles', methods=['POST'])
 def select_roles():
     try:
         conn = get_db_connection()
@@ -1823,7 +1823,18 @@ def add_user():
             return jsonify({"code": 500, "msg": "数据库连接失败"})
 
         cursor = conn.cursor()
-
+        team_id = None
+        if team_name and team_name.strip():
+            cursor.execute(
+                "SELECT id FROM sys_team WHERE team_name=%s",
+                (team_name.strip(),)
+            )
+            team_result = cursor.fetchone()
+            if team_result:
+                team_id = team_result[0]
+                print(f"🔹 找到团队: {team_name}, team_id: {team_id}")
+            else:
+                print(f"⚠️ 未找到团队: {team_name}，将 team_id 设置为 NULL")\
         # 检查用户名是否已存在
         cursor.execute("SELECT id FROM sys_user WHERE username=%s", (username,))
         if cursor.fetchone():
@@ -1838,7 +1849,7 @@ def add_user():
             (username, password, name, mobile, email, team_id, role_id, create_time, update_time)
             VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """,
-            (username, password, name, mobile, email, None, role_id)
+            (username, password, name, mobile, email, team_id, role_id)
         )
 
         conn.commit()
