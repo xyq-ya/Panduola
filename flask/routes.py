@@ -7,12 +7,65 @@ import time
 import pymysql
 from fpdf import FPDF
 import io
+import requests
 bp = Blueprint('auth', __name__)
-
+BAIDU_MAP_AK = "jNTxgXLGcIFxgBCO325017k5ksLtROGj"  # 替换成你自己的百度地图AK
 def get_db_connection():
     """获取数据库连接"""
     return current_app.create_db_connection()
+def get_location_name(lat, lng):
+    """
+    根据经纬度调用百度逆地理编码API获取位置名称（POI优先）
+    """
+    if not lat or not lng:
+        return "未知地点"
+    
+    url = "https://api.map.baidu.com/reverse_geocoding/v3/"
+    params = {
+        "ak": BAIDU_MAP_AK,
+        "output": "json",
+        "coordtype": "bd09ll",       # 如果存的是GPS坐标，先调用百度坐标转换接口再用 bd09ll
+        "location": f"{lat},{lng}",
+        "extensions_poi": 1,
+        "entire_poi": 1,
+        "sort_strategy": "distance"
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=5)
+        data = resp.json()
 
+        if data.get("status") == 0:
+            # 优先取最近的第一个 POI 名称
+            pois = data.get("result", {}).get("pois", [])
+            if pois:
+                return pois[0].get("name", "未知地点")
+            
+            # 如果没有 POI，则返回 formatted_address
+            return data.get("result", {}).get("formatted_address", "未知地点")
+        else:
+            print(f"百度地图API错误: {data.get('msg')}")
+            return "未知地点"
+    
+    except Exception as e:
+        print("百度逆地理编码异常:", e)
+        return "未知地点"
+@bp.route('/get_location_name', methods=['POST'])
+def api_get_location_name():
+    """
+    请求示例：
+    POST /get_location_name
+    JSON body: {"lat": 39.95, "lng": 116.33}
+    """
+    data = request.get_json() or {}
+    lat = data.get('lat')
+    lng = data.get('lng')
+
+    if lat is None or lng is None:
+        return jsonify({"code": 1, "msg": "缺少经纬度参数", "location": "未知地点"})
+
+    location_name = get_location_name(lat, lng)
+    return jsonify({"code": 0, "location": location_name})
 # -------------------- 登录 --------------------
 @bp.route('/login', methods=['POST'])
 def login():
@@ -151,14 +204,14 @@ def user_info():
             return jsonify({"code": 500, "msg": "数据库连接失败"})
             
         cursor = conn.cursor()
-        cursor.execute("SELECT name, role_id, team_id, mbti FROM sys_user WHERE id=%s", (user_id,))
+        cursor.execute("SELECT name, role_id, team_id, mbti, avatar_url FROM sys_user WHERE id=%s", (user_id,))
         user = cursor.fetchone()
         if not user:
             cursor.close()
             conn.close()
             return jsonify({"code": 2, "msg": "用户不存在"})
 
-        name, role_id, team_id, mbti = user
+        name, role_id, team_id, mbti, avatar_url = user
         role_name = None
         team_name = None
         dept_name = None
@@ -182,16 +235,6 @@ def user_info():
 
         cursor.close()
         conn.close()
-        
-        print("user_info 返回:", {
-            "username": name,
-            "role_id": role_id,
-            "role_name": role_name,
-            "department": dept_name,
-            "team": team_name,
-            "team_id": team_id,
-            "mbti": mbti
-        })
 
         return jsonify({
             "code": 0,
@@ -202,7 +245,8 @@ def user_info():
                 "department": dept_name,
                 "team": team_name,
                 "team_id": team_id,
-                "mbti": mbti
+                "mbti": mbti,
+                "avatar_url": avatar_url
             }
         })
 
@@ -457,6 +501,10 @@ def get_logs():
 
         log_list = []
         for log in logs:
+            lat = log[6]
+            lng = log[7]
+            location_name = get_location_name(lat, lng)  # 获取地点名称
+
             log_list.append({
                 "id": log[0],
                 "task_id": log[1],
@@ -464,8 +512,9 @@ def get_logs():
                 "keywords": log[3] or '',
                 "image_url": log[4] or '',
                 "log_date": log[5].strftime('%Y-%m-%d') if log[5] else '',
-                "latitude": log[6],   # 新增经度
-                "longitude": log[7],  # 新增纬度
+                "latitude": lat,
+                "longitude": lng,
+                "location_name": location_name
             })
 
         return jsonify({"code": 0, "data": log_list})
@@ -619,11 +668,12 @@ def company_top_matters():
         conn = get_db_connection()
         if not conn:
             return jsonify({"code": 500, "msg": "数据库连接失败"})
-            
+
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT t.id, t.title
+            SELECT t.id, t.title, t.description, t.status, t.progress, t.create_time,
+                   u.avatar_url
             FROM biz_task t
             JOIN sys_user u ON t.creator_id = u.id
             WHERE u.role_id IN (1, 2) AND t.parent_id IS NULL
@@ -634,8 +684,18 @@ def company_top_matters():
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        
-        data = [{"id": r[0], "title": r[1]} for r in rows]
+
+        data = [
+            {
+                "id": r[0],
+                "title": r[1],
+                "description": r[2] or '',
+                "status": r[3] or 'pending',   # 默认状态
+                "progress": r[4] or 0,         # 默认进度
+                "create_time": r[5].strftime('%Y-%m-%d %H:%M:%S') if r[5] else None,
+                "avatar_url": r[6] or '',      # 创建人头像
+            } for r in rows
+        ]
         return jsonify({"code": 0, "data": data})
     except Exception as e:
         print("company_top_matters 异常:", e)
@@ -648,14 +708,14 @@ def company_dispatched_tasks():
         conn = get_db_connection()
         if not conn:
             return jsonify({"code": 500, "msg": "数据库连接失败"})
-            
+
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT t.id, t.title, t.status, t.progress
+            SELECT t.id, t.title, t.status, t.progress, t.description, t.create_time, u.avatar_url
             FROM biz_task t
             JOIN sys_user u ON t.creator_id = u.id
-            WHERE u.role_id BETWEEN 1 AND 2
+            WHERE assigned_type = 'company' 
             ORDER BY t.update_time DESC, t.create_time DESC
             LIMIT 10
             """
@@ -663,18 +723,28 @@ def company_dispatched_tasks():
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        
+
         data = [
-            {"id": r[0], "title": r[1], "status": r[2], "progress": r[3]} for r in rows
+            {
+                "id": r[0],
+                "title": r[1],
+                "status": r[2],
+                "progress": r[3],
+                "description": r[4] or '',
+                "create_time": r[5].strftime('%Y-%m-%d %H:%M:%S') if r[5] else None,
+                "avatar_url": r[6] or ''   # 头像URL
+            } for r in rows
         ]
         return jsonify({"code": 0, "data": data})
     except Exception as e:
         print("company_dispatched_tasks 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
 
-# -------------------- 个人十大展示项（分配给个人的任务） --------------------
 @bp.route('/personal_top_items', methods=['POST'])
 def personal_top_items():
+    """
+    返回个人展示项，仅展示 biz_task_showcase 中已有的任务，并按 sort_order 排序
+    """
     try:
         body = request.get_json() or {}
         user_id = body.get('user_id')
@@ -684,27 +754,53 @@ def personal_top_items():
         conn = get_db_connection()
         if not conn:
             return jsonify({"code": 500, "msg": "数据库连接失败"})
-            
+
         cursor = conn.cursor()
+
+        # 查询用户展示表
         cursor.execute(
-            """
-            SELECT id, title, status, end_time
-            FROM biz_task
-            WHERE assigned_id = %s
-            ORDER BY update_time DESC, create_time DESC
-            LIMIT 10
-            """,
+            "SELECT task_id, sort_order FROM biz_task_showcase WHERE user_id = %s ORDER BY sort_order ASC",
             (user_id,)
         )
-        rows = cursor.fetchall()
+        showcase_rows = cursor.fetchall()
+        if not showcase_rows:
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 0, "data": []})  # 没有展示项直接返回空列表
+
+        # 获取所有 task_id 并按 sort_order 排序
+        task_ids = [r[0] for r in showcase_rows]
+        sort_order_map = {r[0]: r[1] for r in showcase_rows}
+
+        # 查询 biz_task 表里对应的任务
+        format_strings = ','.join(['%s'] * len(task_ids))
+        cursor.execute(
+            f"""
+            SELECT id, title, status, end_time, description, create_time
+            FROM biz_task
+            WHERE id IN ({format_strings})
+            """,
+            tuple(task_ids)
+        )
+        task_rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        
-        data = [
-            {"id": r[0], "title": r[1], "status": r[2], "end_time": r[3].strftime('%Y-%m-%d') if r[3] else None}
-            for r in rows
-        ]
+
+        # 构造返回数据
+        task_map = {r[0]: {
+            "id": r[0],
+            "title": r[1],
+            "status": r[2],
+            "end_time": r[3].strftime('%Y-%m-%d') if r[3] else None,
+            "description": r[4] or '',
+            "create_time": r[5].strftime('%Y-%m-%d %H:%M:%S') if r[5] else None
+        } for r in task_rows}
+
+        # 按 sort_order 返回
+        data = [task_map[tid] for tid in task_ids if tid in task_map]
+
         return jsonify({"code": 0, "data": data})
+
     except Exception as e:
         print("personal_top_items 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
@@ -721,11 +817,12 @@ def personal_logs():
         conn = get_db_connection()
         if not conn:
             return jsonify({"code": 500, "msg": "数据库连接失败"})
-            
+
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT wl.id, u.name, wl.content, wl.log_date
+            SELECT wl.id, u.name, wl.content, wl.log_date, wl.create_time,
+                   wl.latitude, wl.longitude, wl.keywords
             FROM biz_work_log wl
             JOIN sys_user u ON wl.user_id = u.id
             WHERE wl.user_id = %s
@@ -737,12 +834,27 @@ def personal_logs():
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        
-        data = [
-            {"id": r[0], "username": r[1], "content": r[2], "date": r[3].strftime('%Y-%m-%d')}
-            for r in rows
-        ]
+
+        data = []
+        for r in rows:
+            lat = r[5]
+            lng = r[6]
+            location_name = get_location_name(lat, lng)  # 获取地点名称
+            print(f"日志ID: {r[0]}, 纬度: {lat}, 经度: {lng}, 地点名称: {location_name}")
+            data.append({
+                "id": r[0],
+                "username": r[1],
+                "content": r[2],
+                "log_date": r[3].strftime('%Y-%m-%d') if r[3] else None,
+                "create_time": r[4].strftime('%Y-%m-%d %H:%M:%S') if r[4] else None,
+                "latitude": lat,
+                "longitude": lng,
+                "location_name": location_name,
+                "keywords": r[7] or ''
+            })
+
         return jsonify({"code": 0, "data": data})
+
     except Exception as e:
         print("personal_logs 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
@@ -1644,7 +1756,7 @@ def get_user_info_byid():
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            sql = "SELECT username, password, name, email, mobile FROM sys_user WHERE id=%s"
+            sql = "SELECT username, password, name, email, mobile, avatar_url FROM sys_user WHERE id=%s"
             cursor.execute(sql, (user_id,))
             result = cursor.fetchone()
             if result:
@@ -1656,7 +1768,8 @@ def get_user_info_byid():
                         'password': result[1],
                         'name': result[2],
                         'email': result[3],
-                        'mobile': result[4]
+                        'mobile': result[4],
+                        'avatar_url': result[5]
                     }
                 })
             else:
@@ -1673,7 +1786,7 @@ def update_user_info():
     # 只更新传入字段
     fields = []
     values = []
-    for key in ['username', 'password', 'name', 'email', 'mobile']:
+    for key in ['username', 'password', 'name', 'email', 'mobile', 'avatar_url']:
         if key in data:
             fields.append(f"{key}=%s")
             values.append(data[key])
@@ -2260,3 +2373,86 @@ def generate_mbti_report():
     pdf_output = io.BytesIO(pdf_bytes)
     pdf_output.seek(0)
     return send_file(pdf_output, as_attachment=True, download_name=f"mbti_report_{user_id}.pdf", mimetype='application/pdf')
+
+@bp.route('/update_personal_showcase', methods=['POST'])
+def update_personal_showcase():
+    """
+    更新个人展示项
+    接收参数：
+    {
+        "user_id": 1,
+        "task_ids": [5, 2, 8]   # 按顺序最多10个任务ID
+    }
+    """
+    try:
+        body = request.get_json() or {}
+        user_id = body.get("user_id")
+        task_ids = body.get("task_ids", [])
+
+        if not user_id:
+            return jsonify({"code": 1, "msg": "缺少用户ID"})
+        if not isinstance(task_ids, list) or len(task_ids) > 10:
+            return jsonify({"code": 1, "msg": "task_ids必须是最多10个的列表"})
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+
+        cursor = conn.cursor()
+
+        # 先删除当前用户所有展示项
+        cursor.execute("DELETE FROM biz_task_showcase WHERE user_id = %s", (user_id,))
+
+        # 插入新的展示项，带顺序
+        for idx, task_id in enumerate(task_ids, start=1):
+            cursor.execute(
+                "INSERT INTO biz_task_showcase (user_id, task_id, sort_order) VALUES (%s, %s, %s)",
+                (user_id, task_id, idx)
+            )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"code": 0, "msg": "保存成功"})
+
+    except Exception as e:
+        print("update_personal_showcase 异常:", e)
+        return jsonify({"code": 500, "msg": "服务器内部错误"})
+# -------------------- 上传头像接口 --------------------
+@bp.route('/upload_avatar_image', methods=['POST'])
+def upload_avatar():
+    try:
+        if 'file' not in request.files:
+            return jsonify({"code": 1, "msg": "未上传文件"})
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"code": 1, "msg": "文件名为空"})
+
+        # 头像保存路径
+        upload_folder = os.path.join(
+            current_app.root_path,
+            'static', 'uploads', 'avatar'
+        )
+        os.makedirs(upload_folder, exist_ok=True)
+
+        # 生成安全 + 唯一文件名
+        ext = os.path.splitext(file.filename)[1]
+        filename = f"{int(time.time())}_{secure_filename(file.filename)}"
+        file_path = os.path.join(upload_folder, filename)
+
+        file.save(file_path)
+
+        # 返回前端可访问 URL
+        avatar_url = f"/static/uploads/avatar/{filename}"
+
+        return jsonify({
+            "code": 0,
+            "msg": "上传成功",
+            "avatar_url": avatar_url
+        })
+
+    except Exception as e:
+        print("upload_avatar 异常:", e)
+        return jsonify({"code": 1, "msg": f"上传失败: {str(e)}"})

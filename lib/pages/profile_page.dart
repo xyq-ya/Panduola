@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import '../providers/user_provider.dart';
 import 'login_page.dart';
 import 'home_page.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -25,6 +27,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String team = '';
   int? teamId;
   int unreadMessageCount = 0;
+  String? avatarUrl;
 
   // 团队成员数据
   List<TeamMember> teamMembers = [];
@@ -103,6 +106,9 @@ class _ProfilePageState extends State<ProfilePage> {
         team = data['team'] ?? '未知团队';
         teamId = _parseInt(data['team_id']); // 直接使用接口返回的 team_id
         loading = false;
+        avatarUrl = (data['avatar_url'] != null && data['avatar_url'].isNotEmpty)
+          ? '${UserProvider.baseUrl}${data['avatar_url']}'
+          : 'https://modao.cc/ai/uploads/ai_pics/24/249698/aigp_1757741578.jpeg';
       });
 
       print('设置的用户信息: name=$name, role=$role, department=$department, team=$team, teamId=$teamId');
@@ -336,7 +342,7 @@ class _ProfilePageState extends State<ProfilePage> {
             children: [
               ClipOval(
                 child: Image.network(
-                  'https://modao.cc/ai/uploads/ai_pics/24/249698/aigp_1757741578.jpeg',
+                    avatarUrl ?? 'https://modao.cc/ai/uploads/ai_pics/24/249698/aigp_1757741578.jpeg',
                   width: 96,
                   height: 96,
                   fit: BoxFit.cover,
@@ -1034,32 +1040,44 @@ class EditProfilePage extends StatefulWidget {
 class _EditProfilePageState extends State<EditProfilePage> {
   final _formKey = GlobalKey<FormState>();
 
-  TextEditingController _usernameController = TextEditingController();
-  TextEditingController _passwordController = TextEditingController();
-  TextEditingController _confirmController = TextEditingController(); // 新增确认密码
-  TextEditingController _nameController = TextEditingController();
-  TextEditingController _emailController = TextEditingController();
-  TextEditingController _mobileController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _mobileController = TextEditingController();
 
-  bool _obscurePassword = true; // 密码是否隐藏
+  bool _obscurePassword = true;
   bool loading = true;
+
   int userId = 0;
+
+  // ===== 头像相关 =====
+  String? avatarUrl; // 后端返回的头像 URL
+  File? _avatarFile; // 本地选中的头像文件
+  bool _uploadingAvatar = false;
+
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final userProvider = Provider.of<UserProvider>(context, listen: false);
+
     if (userId == 0 && userProvider.id != null && userProvider.id! > 0) {
       userId = userProvider.id!;
       _fetchUserInfo();
     }
   }
 
+  /// =============================
+  /// 获取用户信息（包含 avatar_url）
+  /// =============================
   Future<void> _fetchUserInfo() async {
     try {
-      final url = Uri.parse(UserProvider.getApiUrl('get_user_info_byid'));
+      final uri = Uri.parse(UserProvider.getApiUrl('get_user_info_byid'));
       final res = await http.post(
-        url,
+        uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': userId}),
       );
@@ -1071,75 +1089,126 @@ class _EditProfilePageState extends State<EditProfilePage> {
           setState(() {
             _usernameController.text = data['username'] ?? '';
             _passwordController.text = data['password'] ?? '';
-            _confirmController.text = data['password'] ?? ''; // 初始化确认密码
+            _confirmController.text = data['password'] ?? '';
             _nameController.text = data['name'] ?? '';
             _emailController.text = data['email'] ?? '';
             _mobileController.text = data['mobile'] ?? '';
+            avatarUrl = (data['avatar_url'] != null && data['avatar_url'].isNotEmpty)
+              ? '${UserProvider.baseUrl}${data['avatar_url']}' 
+              : null;
             loading = false;
           });
-        } else {
-          print('接口错误: ${body['msg']}');
         }
       }
     } catch (e) {
-      print('获取用户信息失败: $e');
+      debugPrint('获取用户信息失败: $e');
     }
   }
 
+  /// =============================
+  /// 选择并上传头像
+  /// =============================
+  Future<void> _pickAndUploadAvatar() async {
+    if (_uploadingAvatar) return;
+
+    final XFile? picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+
+    if (picked == null) return; // 用户取消选择
+
+    setState(() {
+      _avatarFile = File(picked.path); // 用于前端显示
+      _uploadingAvatar = true;
+    });
+
+    try {
+      final uri = Uri.parse(UserProvider.getApiUrl('upload_avatar_image'));
+      final request = http.MultipartRequest('POST', uri);
+      request.files.add(await http.MultipartFile.fromPath('file', _avatarFile!.path));
+
+      final response = await request.send();
+      final respStr = await response.stream.bytesToString();
+      final body = jsonDecode(respStr);
+
+      if (body['code'] == 0 && body['url'] != null) {
+        setState(() {
+          avatarUrl = body['url']; // 保存给后端
+          // ⚠️ 不清空 _avatarFile，保证前端显示最新图片
+        });
+        _showMsg('头像上传成功');
+        print('上传成功，avatarUrl: $avatarUrl');
+      } else {
+        _showMsg(body['msg'] ?? '头像上传失败');
+      }
+    } catch (e) {
+      _showMsg('头像上传异常');
+    } finally {
+      setState(() {
+        _uploadingAvatar = false;
+      });
+    }
+  }
+
+  /// =============================
+  /// 保存用户资料
+  /// =============================
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // 密码确认检查
     if (_passwordController.text != _confirmController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('两次输入的密码不一致')),
-      );
+      _showMsg('两次输入的密码不一致');
       return;
     }
 
+    // 构造要发送的数据
+    final payload = {
+      'user_id': userId,
+      'username': _usernameController.text.trim(),
+      'password': _passwordController.text.trim(),
+      'name': _nameController.text.trim(),
+      'email': _emailController.text.trim(),
+      'mobile': _mobileController.text.trim(),
+      'avatar_url': avatarUrl,
+    };
+
+    // 打印调试
+    print('发送给后端的数据：$payload');
+
     try {
-      final url = Uri.parse(UserProvider.getApiUrl('update_user_info'));
+      final uri = Uri.parse(UserProvider.getApiUrl('update_user_info'));
+
       final res = await http.post(
-        url,
+        uri,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_id': userId,
-          'username': _usernameController.text.trim(),
-          'password': _passwordController.text.trim(),
-          'name': _nameController.text.trim(),
-          'email': _emailController.text.trim(),
-          'mobile': _mobileController.text.trim(),
-        }),
+        body: jsonEncode(payload),
       );
 
-      if (res.statusCode == 200) {
-        final body = jsonDecode(res.body);
-        if (body['code'] == 200) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('更新成功')),
-          );
-          Navigator.pop(context);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('更新失败: ${body['msg']}')),
-          );
-        }
+      final body = jsonDecode(res.body);
+
+      if (body['code'] == 200) {
+        _showMsg('更新成功');
+        Navigator.pop(context);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('请求失败: ${res.statusCode}')),
-        );
+        _showMsg(body['msg'] ?? '更新失败');
       }
     } catch (e) {
-      print('保存用户信息失败: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('网络异常')),
-      );
+      _showMsg('网络异常');
     }
+  }
+
+  void _showMsg(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('编辑个人信息')),
@@ -1149,82 +1218,104 @@ class _EditProfilePageState extends State<EditProfilePage> {
           key: _formKey,
           child: ListView(
             children: [
-              TextFormField(
-                controller: _usernameController,
-                decoration: const InputDecoration(
-                  labelText: '用户名',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) => value == null || value.isEmpty ? '请输入用户名' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  labelText: '密码',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+              /// ===== 头像区域 =====
+              Center(
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.grey.shade200,
+                      backgroundImage: _avatarFile != null
+                          ? FileImage(_avatarFile!)
+                          : (avatarUrl != null && avatarUrl!.isNotEmpty
+                              ? NetworkImage(avatarUrl!)
+                              : null) as ImageProvider?,
+                      child: (_avatarFile == null &&
+                              (avatarUrl == null || avatarUrl!.isEmpty))
+                          ? const Icon(Icons.person, size: 50)
+                          : null,
                     ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      onPressed:
+                          _uploadingAvatar ? null : _pickAndUploadAvatar,
+                      child: _uploadingAvatar
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text('上传头像'),
+                    ),
+                  ],
                 ),
-                validator: (value) => value == null || value.isEmpty ? '请输入密码' : null,
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _confirmController,
-                obscureText: _obscurePassword,
-                decoration: const InputDecoration(
-                  labelText: '确认密码',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) => value == null || value.isEmpty ? '请确认密码' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: '姓名',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) => value == null || value.isEmpty ? '请输入姓名' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: '邮箱',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) => value == null || value.isEmpty ? '请输入邮箱' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _mobileController,
-                decoration: const InputDecoration(
-                  labelText: '手机号',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) => value == null || value.isEmpty ? '请输入手机号' : null,
-              ),
+
+              const SizedBox(height: 24),
+
+              /// ===== 表单 =====
+              _buildInput(_usernameController, '用户名'),
+              _buildPassword(),
+              _buildInput(_confirmController, '确认密码', obscure: true),
+              _buildInput(_nameController, '姓名'),
+              _buildInput(_emailController, '邮箱'),
+              _buildInput(_mobileController, '手机号'),
+
               const SizedBox(height: 32),
+
               ElevatedButton(
                 onPressed: _saveProfile,
-                child: const Text('保存'),
                 style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 50),
+                  minimumSize: const Size(double.infinity, 48),
                 ),
+                child: const Text('保存'),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildInput(TextEditingController controller, String label,
+      {bool obscure = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextFormField(
+        controller: controller,
+        obscureText: obscure,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+        ),
+        validator: (v) => v == null || v.isEmpty ? '请输入$label' : null,
+      ),
+    );
+  }
+
+  Widget _buildPassword() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextFormField(
+        controller: _passwordController,
+        obscureText: _obscurePassword,
+        decoration: InputDecoration(
+          labelText: '密码',
+          border: const OutlineInputBorder(),
+          suffixIcon: IconButton(
+            icon: Icon(
+              _obscurePassword ? Icons.visibility_off : Icons.visibility,
+            ),
+            onPressed: () {
+              setState(() {
+                _obscurePassword = !_obscurePassword;
+              });
+            },
+          ),
+        ),
+        validator: (v) => v == null || v.isEmpty ? '请输入密码' : null,
       ),
     );
   }

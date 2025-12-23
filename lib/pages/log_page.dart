@@ -472,11 +472,20 @@ class _LogDetailPageState extends State<LogDetailPage> {
 
   Widget _buildInfo(String value) => Text(value, style: const TextStyle(fontSize: 16));
 
-  Widget _buildLocation(String latitude, String longitude) => Column(
+  // 改造后的 _buildLocation，显示经纬度和地点名称
+  Widget _buildLocation(String latitude, String longitude, String locationName) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("纬度: $latitude", style: const TextStyle(fontSize: 16)),
-          Text("经度: $longitude", style: const TextStyle(fontSize: 16)),
+          if (latitude.isNotEmpty && longitude.isNotEmpty)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("纬度: $latitude", style: const TextStyle(fontSize: 16)),
+                Text("经度: $longitude", style: const TextStyle(fontSize: 16)),
+              ],
+            ),
+          const SizedBox(height: 4),
+          Text("位置: $locationName", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
         ],
       );
 
@@ -484,6 +493,7 @@ class _LogDetailPageState extends State<LogDetailPage> {
   Widget build(BuildContext context) {
     final lat = widget.log['latitude']?.toString() ?? '';
     final lng = widget.log['longitude']?.toString() ?? '';
+    final locationName = widget.log['location_name'] ?? '未知地点';
 
     return Scaffold(
       appBar: AppBar(
@@ -511,7 +521,7 @@ class _LogDetailPageState extends State<LogDetailPage> {
               icon: Icons.image,
             ),
           _buildCard(title: "日志日期", child: _buildInfo(widget.log['log_date'] ?? ""), icon: Icons.calendar_today),
-          _buildCard(title: "位置", child: _buildLocation(lat, lng), icon: Icons.location_on),
+          _buildCard(title: "位置", child: _buildLocation(lat, lng, locationName), icon: Icons.location_on),
         ],
       ),
     );

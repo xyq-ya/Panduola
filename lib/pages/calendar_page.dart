@@ -961,25 +961,19 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // 上方：甘特图（固定显示）
-          _buildGanttChart(),
-
-          // 中间：日期选择和视图切换
-          _buildDateSelectorCard(),
-          _buildViewSelectorCard(),
-
-          // 下方：任务详细列表（根据视图切换）
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refreshData,
-              child: SingleChildScrollView(
-                child: _buildTaskList(),
-              ),
-            ),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            children: [
+              _buildGanttChart(),
+              _buildDateSelectorCard(),
+              _buildViewSelectorCard(),
+              _buildTaskList(),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
