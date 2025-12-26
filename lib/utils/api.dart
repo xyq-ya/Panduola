@@ -10,11 +10,11 @@ class Api {
 
     if (kIsWeb) {
       // Web 端直接指向本机 Flask 服务，避免使用 origin(8080)
-      return 'http://192.168.10.124:5000';
+      return 'http://192.168.128.39:5000';
     }
     try {
-      if (Platform.isAndroid) return 'http://192.168.10.124:5000';
-      return 'http://192.168.10.124:5000';
+      if (Platform.isAndroid) return 'http://192.168.128.39:5000';
+      return 'http://192.168.128.39:5000';
     } catch (e) {
       // 如果无法访问 Platform（安全回退）
       return 'http://10.0.2.2:5000';

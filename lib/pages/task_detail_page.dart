@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async'; 
 import 'package:image_picker/image_picker.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:flutter/services.dart';
+import 'package:location/location.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'home_page.dart';
 import '../providers/user_provider.dart';
 
 class TaskDetailPage extends StatefulWidget {
@@ -744,53 +747,85 @@ class _WorkLogPageState extends State<WorkLogPage> {
 
   double? _latitude;
   double? _longitude;
-
+  String _locationMessage = "正在获取位置...";
+  Location location = Location();  // 创建 Location 实例
+  bool _serviceEnabled = false;
+  PermissionStatus? _permissionGranted;
+  @override
   @override
   void initState() {
     super.initState();
-    _getLocation(); // 页面加载时自动获取位置
+    // 改为延迟执行
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _getLocation();
+    });
   }
 
   Future<void> _getLocation() async {
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("请开启定位服务")),
-        );
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("定位权限被拒绝")),
-          );
-          return;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("定位权限被永久拒绝")),
-        );
-        return;
-      }
-
-      Position pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       setState(() {
-        _latitude = pos.latitude;
-        _longitude = pos.longitude;
+        _locationMessage = "正在获取位置...";
       });
+
+      // 直接获取位置，设置超时
+      LocationData locationData;
+      
+      try {
+        // 使用 timeout() 方法，设置10秒超时
+        locationData = await location.getLocation()
+            .timeout(Duration(seconds: 10));
+      } on TimeoutException {
+        setState(() {
+          _locationMessage = "获取位置超时（10秒）";
+        });
+        return;
+      }
+
+      // 检查位置数据是否有效
+      if (locationData.latitude == null || locationData.longitude == null) {
+        setState(() {
+          _locationMessage = "位置数据为空";
+        });
+        return;
+      }
+
+      // 检查是否为有效坐标（排除0,0）
+      if (locationData.latitude!.abs() < 0.0001 && 
+          locationData.longitude!.abs() < 0.0001) {
+        setState(() {
+          _locationMessage = "获取到无效位置";
+        });
+        return;
+      }
+
+      setState(() {
+        _latitude = locationData.latitude;
+        _longitude = locationData.longitude;
+        _locationMessage = "位置获取成功";
+      });
+
+    } on PlatformException catch (e) {
+      // 处理平台异常
+      print("平台异常: ${e.code} - ${e.message}");
+      
+      String errorMsg = "获取位置失败";
+      if (e.code == 'PERMISSION_DENIED') {
+        errorMsg = "定位权限被拒绝";
+      } else if (e.code == 'SERVICE_DISABLED') {
+        errorMsg = "定位服务未开启";
+      }
+      
+      setState(() {
+        _locationMessage = errorMsg;
+      });
+      
     } catch (e) {
-      print("❌ 获取位置异常: $e");
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text("获取位置异常")));
+      print("获取位置异常: $e");
+      setState(() {
+        _locationMessage = "获取位置失败";
+      });
     }
   }
-
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final result = await picker.pickImage(source: ImageSource.gallery);
@@ -951,10 +986,28 @@ class _WorkLogPageState extends State<WorkLogPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Text(
-                      _latitude != null && _longitude != null
-                          ? "纬度: ${_latitude!.toStringAsFixed(6)}, 经度: ${_longitude!.toStringAsFixed(6)}"
-                          : "正在获取位置...",
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_latitude != null && _longitude != null)
+                          Text(
+                            "纬度: ${_latitude!.toStringAsFixed(6)}, 经度: ${_longitude!.toStringAsFixed(6)}",
+                          )
+                        else
+                          Text(
+                            _locationMessage, // 使用状态变量
+                            style: TextStyle(
+                              color: _locationMessage.contains("成功") 
+                                  ? Colors.green 
+                                  : _locationMessage.contains("超时") || 
+                                    _locationMessage.contains("失败") || 
+                                    _locationMessage.contains("拒绝") || 
+                                    _locationMessage.contains("无效")
+                                    ? Colors.orange
+                                    : Colors.black,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   IconButton(

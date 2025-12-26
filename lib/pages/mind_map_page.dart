@@ -4,6 +4,7 @@ import '../providers/user_provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../utils/api.dart';
+import 'mind_map_detail.dart';
 
 class MindMapPage extends StatefulWidget {
   const MindMapPage({super.key});
@@ -25,10 +26,17 @@ class _MindMapPageState extends State<MindMapPage> {
   List<String> employees = [];
 
   // 数据源
-  List<String> companyMatters = [];
+  // 不要转成 List<String>
+  List<Map<String, dynamic>> companyMatters = [];
   List<Map<String, dynamic>> companyDispatched = [];
   List<Map<String, dynamic>> personalTopItems = [];
   List<Map<String, dynamic>> personalLogs = [];
+
+  // 选中用于展示的数据
+  List<Map<String, dynamic>> selectedCompanyMatters = [];
+  List<Map<String, dynamic>> selectedCompanyDispatched = [];
+  List<Map<String, dynamic>> selectedPersonalTopItems = [];
+  List<Map<String, dynamic>> selectedPersonalLogs = [];
 
   bool loading = true;
 
@@ -137,15 +145,22 @@ class _MindMapPageState extends State<MindMapPage> {
 
   Future<void> _loadMindMapData() async {
     try {
+      // 每次加载前，清空已选择数据，确保根据最新数据刷新展示
+      selectedCompanyMatters = [];
+      selectedCompanyDispatched = [];
+      selectedPersonalTopItems = [];
+      selectedPersonalLogs = [];
+
       // 公司十大事项
       var apiUrl = UserProvider.getApiUrl('company_top_matters');
       final resMatters = await http.get(Uri.parse(apiUrl));
       if (resMatters.statusCode == 200) {
         final body = jsonDecode(resMatters.body);
         if (body['code'] == 0) {
-          final list = (body['data'] as List).cast<Map>();
-          companyMatters = list.map((e) => (e['title'] ?? '').toString()).toList();
+          final list = (body['data'] as List).cast<Map<String, dynamic>>();
+          companyMatters = list;
         }
+        print('✅ companyMatters = $companyMatters');
       }
 
       // 公司十大派发任务
@@ -187,6 +202,12 @@ class _MindMapPageState extends State<MindMapPage> {
           }
         }
       }
+
+      // 默认全部展示（用户还未重新勾选时）
+      selectedCompanyMatters = List<Map<String, dynamic>>.from(companyMatters);
+      selectedCompanyDispatched = List<Map<String, dynamic>>.from(companyDispatched);
+      selectedPersonalTopItems = List<Map<String, dynamic>>.from(personalTopItems);
+      selectedPersonalLogs = List<Map<String, dynamic>>.from(personalLogs);
     } catch (e) {
       print('加载导图数据错误: $e');
     } finally {
@@ -210,8 +231,6 @@ class _MindMapPageState extends State<MindMapPage> {
           final data = body['data'];
           setState(() {
             _targetUserId = data['id'];
-            // 如果需要，也可以更新团队/角色
-            _roleId = data['role_id'];
             selectedEmployee = data['name'];
           });
           print('现在观察: $_targetUserId');
@@ -230,6 +249,108 @@ class _MindMapPageState extends State<MindMapPage> {
   bool get canSelectDepartment => _roleId != null && _roleId! <= 2;
   bool get canSelectTeam => _roleId != null && (_roleId! <= 3 || _roleId! == 4);
   bool get canSelectEmployee => _roleId != null && _roleId! <= 4;
+  bool get canEditCompanyBlocks => _roleId != null && _roleId! <= 2;
+
+  // 通用弹窗选择器
+  void _openSelectionDialog<T>({
+    required String title,
+    required List<T> sourceList,
+    required List<T> currentSelected,
+    required bool canConfirm,
+    required void Function(List<T>) onConfirm,
+    required String Function(T) displayText,
+  }) {
+    // 即使列表为空也允许弹出窗格（只是内容为空）
+    final List<T> initial =
+        currentSelected.isNotEmpty ? List<T>.from(currentSelected) : List<T>.from(sourceList);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: StatefulBuilder(
+            builder: (context, setStateDialog) {
+              final selected = initial;
+              return SizedBox(
+                width: MediaQuery.of(context).size.width * 0.9,
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: Column(
+                  children: [
+                    // 标题 + 关闭
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    // 内容列表
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: sourceList.length,
+                        itemBuilder: (context, index) {
+                          final item = sourceList[index];
+                          final text = displayText(item);
+                          final bool isChecked = selected.contains(item);
+                          return CheckboxListTile(
+                            title: Text(
+                              text,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            value: isChecked,
+                            onChanged: (v) {
+                              setStateDialog(() {
+                                if (v == true) {
+                                  if (!selected.contains(item)) {
+                                    selected.add(item);
+                                  }
+                                } else {
+                                  selected.remove(item);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: canConfirm
+                              ? () {
+                                  onConfirm(List<T>.from(selected));
+                                  Navigator.of(context).pop();
+                                }
+                              : null,
+                          child: Text(canConfirm ? '确定' : '没有权限选择展示'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildDropdown({
     required String label,
@@ -288,8 +409,8 @@ class _MindMapPageState extends State<MindMapPage> {
       children: [
         // 顶部下拉框
         Container(
-          height: 80,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          height: 100,
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               colors: [Color(0xFFA5D8FF), Color(0xFF87CEEB)],
@@ -366,81 +487,119 @@ class _MindMapPageState extends State<MindMapPage> {
                   children: [
                     Row(
                       children: [
+                        // 公司十大事项
                         SizedBox(
                           width: cardWidth,
                           height: cardHeight,
-                          child: _card(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  '公司十大事项',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF1E3A8A)),
-                                ),
-                                const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: companyMatters.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final title = companyMatters[index];
-                                        // 用不同颜色做区分
-                                        final color = index % 3 == 0
-                                            ? Colors.redAccent
-                                            : index % 3 == 1
-                                                ? Colors.orange
-                                                : Colors.green;
-                                        final bg = index % 3 == 0
-                                            ? Colors.red.shade50
-                                            : index % 3 == 1
-                                                ? Colors.yellow.shade50
-                                                : Colors.green.shade50;
-                                        return _priorityRow(title, color, bg);
-                                      },
-                                    ),
+                          child: GestureDetector(
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MindMapDetailPage(
+                                    api: UserProvider.getApiUrl('company_top_matters'),
+                                    userId: _userId!,
+                                    targetUserId: _targetUserId!,
                                   ),
                                 ),
-                              ],
+                              );
+                              await _loadMindMapData();
+                            },
+                            child: _card(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '公司十大事项',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1E3A8A),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: Scrollbar(
+                                      child: ListView.separated(
+                                        padding: EdgeInsets.zero,
+                                        itemCount: selectedCompanyMatters.isNotEmpty
+                                            ? selectedCompanyMatters.length
+                                            : companyMatters.length,
+                                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                        itemBuilder: (context, index) {
+                                          final list = selectedCompanyMatters.isNotEmpty
+                                              ? selectedCompanyMatters
+                                              : companyMatters;
+                                          final item = list[index];
+                                          final avatarFullUrl = (item['avatar_url'] ?? '').isNotEmpty
+                                              ? '${UserProvider.baseUrl}${item['avatar_url']}'
+                                              : null;
+                                          return _taskRow(item['title'] ?? '', avatarFullUrl, index);
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(width: 12),
+                        // 公司十大派发任务
                         SizedBox(
                           width: cardWidth,
                           height: cardHeight,
-                          child: _card(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  '公司十大派发任务',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFFEC6A1E)),
-                                ),
-                                const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: companyDispatched.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final item = companyDispatched[index];
-                                        final status = (item['status'] ?? '').toString();
-                                        final isDone = status.contains('done') || status == 'completed' || status == '已完成';
-                                        final bg = isDone ? Colors.green.shade100 : Colors.orange.shade100;
-                                        final color = isDone ? Colors.green : Colors.orange;
-                                        return _taskRow(item['title'] ?? '', status, bg, color);
-                                      },
-                                    ),
+                          child: GestureDetector(
+                            onTap: () async{
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MindMapDetailPage(
+                                    api: UserProvider.getApiUrl('company_dispatched_tasks'),
+                                    userId: _userId!,
+                                    targetUserId: _targetUserId!,
                                   ),
                                 ),
-                              ],
+                              );
+                              await _loadMindMapData();
+                            },
+                            child: _card(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '公司十大派发任务',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFEC6A1E),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: Scrollbar(
+                                      child: ListView.separated(
+                                        padding: EdgeInsets.zero,
+                                        itemCount: selectedCompanyDispatched.isNotEmpty
+                                            ? selectedCompanyDispatched.length
+                                            : companyDispatched.length,
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(height: 8),
+                                        itemBuilder: (context, index) {
+                                          final list = selectedCompanyDispatched.isNotEmpty
+                                              ? selectedCompanyDispatched
+                                              : companyDispatched;
+                                          final item = list[index];
+                                          final avatarFullUrl = (item['avatar_url'] ?? '').isNotEmpty
+                                            ? '${UserProvider.baseUrl}${item['avatar_url']}'
+                                            : null;
+                                          return _taskRow(item['title'] ?? '', avatarFullUrl, index);
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -449,75 +608,158 @@ class _MindMapPageState extends State<MindMapPage> {
                     const SizedBox(height: 12),
                     Row(
                       children: [
+                        // 个人十大展示项
                         SizedBox(
                           width: cardWidth,
                           height: cardHeight,
-                          child: _card(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  '个人十大展示项',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF6D28D9)),
-                                ),
-                                const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: personalTopItems.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final item = personalTopItems[index];
-                                        final title = (item['title'] ?? '').toString();
-                                        final end = (item['end_time'] ?? '').toString();
-                                        final status = (item['status'] ?? '').toString();
-                                        final icon = status == 'completed' || status == 'done' ? Icons.check_circle : Icons.circle_outlined;
-                                        final color = status == 'completed' || status == 'done' ? Colors.green : Colors.blue;
-                                        return _SimpleRow(icon: icon, color: color, title: title, time: end);
-                                      },
-                                    ),
+                          child: GestureDetector(
+                            onTap: () async{
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MindMapDetailPage(
+                                    api: UserProvider.getApiUrl('personal_top_items'),
+                                    userId: _userId!,
+                                    targetUserId: _targetUserId!,
                                   ),
                                 ),
-                              ],
+                              );
+                              await _loadMindMapData();
+                            },
+                            child: _card(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '个人十大展示项',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF6D28D9),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: Scrollbar(
+                                      child: ListView.separated(
+                                        padding: EdgeInsets.zero,
+                                        itemCount: selectedPersonalTopItems.isNotEmpty
+                                            ? selectedPersonalTopItems.length
+                                            : personalTopItems.length,
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(height: 8),
+                                        itemBuilder: (context, index) {
+                                          final list = selectedPersonalTopItems.isNotEmpty
+                                              ? selectedPersonalTopItems
+                                              : personalTopItems;
+                                          final item = list[index];
+                                          final title = (item['title'] ?? '').toString();
+                                          final end = (item['end_time'] ?? '').toString();
+                                          final status = (item['status'] ?? '').toString();
+                                          final icon = status == 'completed' ||
+                                                  status == 'done'
+                                              ? Icons.check_circle
+                                              : Icons.circle_outlined;
+                                          final color = status == 'completed' ||
+                                                  status == 'done'
+                                              ? Colors.green
+                                              : Colors.blue;
+                                          return Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Icon(icon, color: color, size: 16),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      title,
+                                                      style: const TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight: FontWeight.w500,
+                                                      ),
+                                                    ),
+                                                    if (end.isNotEmpty)
+                                                      Padding(
+                                                        padding: const EdgeInsets.only(top: 2),
+                                                        child: Text(
+                                                          end,
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            color: Colors.grey.shade500,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(width: 12),
+                        // 个人日志
                         SizedBox(
                           width: cardWidth,
                           height: cardHeight,
-                          child: _card(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  '个人日志',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFFEC4899)),
-                                ),
-                                const SizedBox(height: 8),
-                                Expanded(
-                                  child: Scrollbar(
-                                    child: ListView.separated(
-                                      itemCount: personalLogs.length,
-                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                      itemBuilder: (context, index) {
-                                        final log = personalLogs[index];
-                                        return _logItem(
-                                          (log['username'] ?? '').toString(),
-                                          (log['content'] ?? '').toString(),
-                                          (log['date'] ?? '').toString(),
-                                        );
-                                      },
-                                    ),
+                          child: GestureDetector(
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MindMapDetailPage(
+                                    api: UserProvider.getApiUrl('personal_logs'),
+                                    userId: _userId!,
+                                    targetUserId: _targetUserId!,
                                   ),
                                 ),
-                              ],
+                              );
+                              await _loadMindMapData();
+                            },
+                            child: _card(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '个人日志',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFEC4899),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: Scrollbar(
+                                      child: ListView.separated(
+                                        padding: EdgeInsets.zero,
+                                        itemCount: selectedPersonalLogs.isNotEmpty
+                                            ? selectedPersonalLogs.length
+                                            : personalLogs.length,
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(height: 8),
+                                        itemBuilder: (context, index) {
+                                          final log = selectedPersonalLogs.isNotEmpty
+                                              ? selectedPersonalLogs[index]
+                                              : personalLogs[index];
+                                          final content = (log['content'] ?? '').toString();
+                                          final date = (log['log_date'] ?? '').toString(); // 或 create_time，看你想显示哪一个
+                                          return _logItem(content, date);
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -533,96 +775,84 @@ class _MindMapPageState extends State<MindMapPage> {
     );
   }
 
-  Widget _priorityRow(String title, Color dot, Color bg) {
+  Widget _taskRow(String title, String? avatarUrl, int index) {
+    // 颜色轮换背景参考公司十大事项
+    Color bg = index % 3 == 0
+        ? Colors.red.shade50
+        : index % 3 == 1
+            ? Colors.yellow.shade50
+            : Colors.green.shade50;
+
+    Color borderColor = bg; // 边框淡色，跟背景一致
+
     return Row(
       children: [
+        // 头像
+        CircleAvatar(
+          radius: 14,
+          backgroundColor: Colors.grey[300],
+          backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
+              ? NetworkImage(avatarUrl)
+              : null,
+          child: (avatarUrl == null || avatarUrl.isEmpty)
+              ? const Icon(Icons.person, size: 16, color: Colors.grey)
+              : null,
+        ),
+        const SizedBox(width: 8),
+        // 文字框
         Expanded(
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
               color: bg,
-              border: Border.all(color: bg),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: borderColor), // 边框淡色
             ),
-            child: Text(title, style: const TextStyle(fontSize: 13)),
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
-        Icon(Icons.circle, color: dot, size: 18),
-      ],
-    );
-  }
-
-  Widget _taskRow(String title, String state, Color bg, Color textColor) {
-    return Row(
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: Colors.grey[300],
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Icon(Icons.person, size: 16, color: Colors.grey),
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: Text(title, style: const TextStyle(fontSize: 13))),
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-          child: Text(state, style: TextStyle(color: textColor, fontSize: 12)),
         ),
       ],
     );
   }
 
-  Widget _logItem(String name, String content, String time) {
+  Widget _logItem(String content, String date) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: Colors.grey[300],
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Icon(Icons.person, size: 16, color: Colors.grey),
-        ),
+        // 左侧状态圈，可统一颜色或使用蓝色
+        Icon(Icons.circle_outlined, color: Colors.blue, size: 16),
         const SizedBox(width: 8),
         Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(12)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(content, style: const TextStyle(fontSize: 12)),
-              const SizedBox(height: 6),
-              Text(time, style: TextStyle(fontSize: 10, color: Colors.grey.shade400)),
-            ]),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 内容
+              Text(
+                content,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black87,
+                ),
+              ),
+              // 日期
+              if (date.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    date,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
-      ],
-    );
-  }
-}
-
-class _SimpleRow extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String time;
-  const _SimpleRow({required this.icon, required this.color, required this.title, required this.time});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: color),
-        const SizedBox(width: 8),
-        Expanded(child: Text(title)),
-        if (time.isNotEmpty) Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
       ],
     );
   }
