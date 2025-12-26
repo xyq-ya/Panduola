@@ -373,7 +373,6 @@ class _ProfilePageState extends State<ProfilePage> {
             children: [
               _buildProfileItem(Icons.settings, '系统设置', const Color(0xFF5C6BC0), 0),
               _buildProfileItem(Icons.notifications, '消息中心', const Color(0xFFFF9800), 4, badgeCount: unreadMessageCount),
-              _buildProfileItem(Icons.book, '项目文档', const Color(0xFF66BB6A), 0),
               _buildProfileItem(Icons.group, '团队成员', const Color(0xFFF44336), 1),
               _buildProfileItem(Icons.pie_chart, '数据报表', const Color(0xFF9C27B0), 2),
               _buildProfileItem(Icons.help, '帮助中心', const Color(0xFF03A9F4), 3),
@@ -394,7 +393,16 @@ class _ProfilePageState extends State<ProfilePage> {
     return GestureDetector(
       onTap: () {
         if (index == 0) {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage()));
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SettingsPage()),
+          ).then((_) {
+            // 当从系统设置页面返回时，刷新用户信息
+            if (userId > 0) {
+              _fetchUserInfo(userId);
+              _fetchUnreadMessageCount();
+            }
+          });
         } else if (index == 1) {
           if (teamId != null && teamId! > 0) _fetchTeamMembers();
         } else if (index == 2) {
@@ -1011,11 +1019,16 @@ class SettingsPage extends StatelessWidget {
             title: const Text('更改用户信息'),
             trailing: const Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () {
-              // 跳转到修改用户信息页面
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const EditProfilePage()),
-              );
+              ).then((_) {
+                // 页面返回后刷新 ProfilePage
+                final state = context.findAncestorStateOfType<_ProfilePageState>();
+                if (state != null) {
+                  state._fetchUserInfo(state.userId); // 重新获取用户信息
+                }
+              });
             },
           ),
           const Divider(),
@@ -1132,10 +1145,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final respStr = await response.stream.bytesToString();
       final body = jsonDecode(respStr);
 
-      if (body['code'] == 0 && body['url'] != null) {
+      if (body['code'] == 0 && body['avatar_url'] != null) {
         setState(() {
-          avatarUrl = body['url']; // 保存给后端
-          // ⚠️ 不清空 _avatarFile，保证前端显示最新图片
+          avatarUrl = body['avatar_url']; // 保存给后端
         });
         _showMsg('头像上传成功');
         print('上传成功，avatarUrl: $avatarUrl');

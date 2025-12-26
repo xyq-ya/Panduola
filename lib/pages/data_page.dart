@@ -1058,7 +1058,7 @@ class _DataPageState extends State<DataPage> {
                           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                         ),
                         onPressed: _userId == null ? null : () async {
-                          final url = Uri.parse('http://10.0.2.2:5000/api/generate_mbti_report');
+                          final url = Uri.parse(UserProvider.getApiUrl('generate_mbti_report'));
                           final res = await http.post(
                             url,
                             headers: {'Content-Type': 'application/json'},

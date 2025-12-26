@@ -483,7 +483,6 @@ class _WebTeamManagePageState extends State<WebTeamManagePage> {
                         child: const Text("清空筛选"),
                       ),
 
-                      const Spacer(),
 
                       // 刷新按钮
                       IconButton(

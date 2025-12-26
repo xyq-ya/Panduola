@@ -664,39 +664,62 @@ def stats_dashboard():
 # -------------------- 公司十大事项（公司层面主事项） --------------------
 @bp.route('/company_top_matters', methods=['GET'])
 def company_top_matters():
+    """
+    返回公司层面展示的十大事项，仅展示 biz_company_task_showcase 中已有的任务，
+    并按 sort_order 排序
+    """
     try:
         conn = get_db_connection()
         if not conn:
             return jsonify({"code": 500, "msg": "数据库连接失败"})
 
         cursor = conn.cursor()
+
+        # 查询公司展示表
         cursor.execute(
-            """
+            "SELECT task_id, sort_order FROM biz_company_task_showcase ORDER BY sort_order ASC"
+        )
+        showcase_rows = cursor.fetchall()
+        if not showcase_rows:
+            cursor.close()
+            conn.close()
+            return jsonify({"code": 0, "data": []})  # 没有展示项直接返回空列表
+
+        # 获取所有 task_id 并按 sort_order 排序
+        task_ids = [r[0] for r in showcase_rows]
+        sort_order_map = {r[0]: r[1] for r in showcase_rows}
+
+        # 查询 biz_task 表里对应的任务
+        format_strings = ','.join(['%s'] * len(task_ids))
+        cursor.execute(
+            f"""
             SELECT t.id, t.title, t.description, t.status, t.progress, t.create_time,
                    u.avatar_url
             FROM biz_task t
             JOIN sys_user u ON t.creator_id = u.id
-            WHERE u.role_id IN (1, 2) AND t.parent_id IS NULL
-            ORDER BY t.update_time DESC, t.create_time DESC
-            LIMIT 10
-            """
+            WHERE t.id IN ({format_strings}) 
+            """,
+            tuple(task_ids)
         )
-        rows = cursor.fetchall()
+        task_rows = cursor.fetchall()
         cursor.close()
         conn.close()
 
-        data = [
-            {
-                "id": r[0],
-                "title": r[1],
-                "description": r[2] or '',
-                "status": r[3] or 'pending',   # 默认状态
-                "progress": r[4] or 0,         # 默认进度
-                "create_time": r[5].strftime('%Y-%m-%d %H:%M:%S') if r[5] else None,
-                "avatar_url": r[6] or '',      # 创建人头像
-            } for r in rows
-        ]
+        # 构造返回数据
+        task_map = {r[0]: {
+            "id": r[0],
+            "title": r[1] or '',
+            "description": r[2] or '',
+            "status": r[3] or 'pending',
+            "progress": r[4] or 0,
+            "create_time": r[5].strftime('%Y-%m-%d %H:%M:%S') if r[5] else None,
+            "avatar_url": r[6] or ''
+        } for r in task_rows}
+
+        # 按 sort_order 返回
+        data = [task_map[tid] for tid in task_ids if tid in task_map]
         return jsonify({"code": 0, "data": data})
+
     except Exception as e:
         print("company_top_matters 异常:", e)
         return jsonify({"code": 500, "msg": "服务器内部错误"})
@@ -2376,14 +2399,6 @@ def generate_mbti_report():
 
 @bp.route('/update_personal_showcase', methods=['POST'])
 def update_personal_showcase():
-    """
-    更新个人展示项
-    接收参数：
-    {
-        "user_id": 1,
-        "task_ids": [5, 2, 8]   # 按顺序最多10个任务ID
-    }
-    """
     try:
         body = request.get_json() or {}
         user_id = body.get("user_id")
@@ -2456,3 +2471,121 @@ def upload_avatar():
     except Exception as e:
         print("upload_avatar 异常:", e)
         return jsonify({"code": 1, "msg": f"上传失败: {str(e)}"})
+# -------------------- 获取所有 company 类型任务 --------------------
+@bp.route('/company_tasks', methods=['GET'])
+def get_company_tasks():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, title, start_time, end_time
+            FROM biz_task
+            WHERE assigned_type = 'company'
+            ORDER BY id ASC
+        """)
+        tasks = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        task_list = []
+        for t in tasks:
+            # 处理 datetime 对象转字符串（若为 None 则转为 null）
+            start_str = t[2].strftime('%Y-%m-%d %H:%M:%S') if t[2] else None
+            end_str = t[3].strftime('%Y-%m-%d %H:%M:%S') if t[3] else None
+            task_list.append({
+                "id": t[0],
+                "title": t[1],
+                "start_time": start_str,
+                "end_time": end_str
+            })
+
+        return jsonify({"code": 0, "msg": "成功", "data": task_list})
+    except Exception as e:
+        print("获取 company 任务异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器错误: {str(e)}"})
+
+
+# -------------------- 获取公司当前展示的十大任务（按 sort_order 排序） --------------------
+@bp.route('/get_company_showcase', methods=['GET'])
+def get_company_showcase():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # 按 sort_order 升序（前端默认顺序），若需支持倒序由前端控制展示即可
+        cursor.execute("""
+            SELECT task_id
+            FROM biz_company_task_showcase
+            ORDER BY sort_order ASC, id ASC
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        task_ids = [row[0] for row in rows]
+        return jsonify({"code": 0, "msg": "成功", "data": task_ids})
+    except Exception as e:
+        print("获取公司展示任务异常:", e)
+        return jsonify({"code": 500, "msg": f"服务器错误: {str(e)}"})
+
+
+# -------------------- 更新公司展示的十大任务 --------------------
+@bp.route('/update_company_showcase', methods=['POST'])
+def update_company_showcase():
+    try:
+        data = request.get_json() or {}
+        task_ids = data.get('task_ids', [])
+
+        if not isinstance(task_ids, list):
+            return jsonify({"code": 1, "msg": "task_ids 必须是数组"})
+
+        if len(task_ids) > 10:
+            return jsonify({"code": 1, "msg": "最多只能选择10个任务"})
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"code": 500, "msg": "数据库连接失败"})
+            
+        cursor = conn.cursor()
+
+        # 验证所有 task_id 是否真实存在且 assigned_type='company'，并获取 creator_id
+        if task_ids:
+            placeholders = ','.join(['%s'] * len(task_ids))
+            cursor.execute(f"""
+                SELECT id, creator_id FROM biz_task
+                WHERE id IN ({placeholders}) AND assigned_type = 'company'
+            """, tuple(task_ids))
+            
+            valid_tasks = cursor.fetchall()
+            valid_task_map = {row[0]: row[1] for row in valid_tasks}  # task_id: creator_id
+            valid_ids_set = set(valid_task_map.keys())
+            
+            invalid = [tid for tid in task_ids if tid not in valid_ids_set]
+            if invalid:
+                cursor.close()
+                conn.close()
+                return jsonify({"code": 1, "msg": f"以下任务ID无效或非公司任务: {invalid}"})
+
+        # 开始事务更新
+        # 先删除所有记录（不再限定 user_id=0）
+        cursor.execute("DELETE FROM biz_company_task_showcase")
+
+        # 再插入新的（按前端传入顺序作为 sort_order）
+        if task_ids:
+            insert_data = []
+            for idx, task_id in enumerate(task_ids):
+                creator_id = valid_task_map[task_id]
+                insert_data.append((creator_id, task_id, idx))
+            
+            cursor.executemany(
+                "INSERT INTO biz_company_task_showcase (user_id, task_id, sort_order) VALUES (%s, %s, %s)",
+                insert_data
+            )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"code": 0, "msg": "公司十大任务更新成功"})
+    except Exception as e:
+        print("更新公司展示任务异常:", e)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"code": 500, "msg": f"服务器错误: {str(e)}"})

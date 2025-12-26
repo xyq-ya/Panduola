@@ -26,13 +26,14 @@ class _MindMapPageState extends State<MindMapPage> {
   List<String> employees = [];
 
   // 数据源
-  List<String> companyMatters = [];
+  // 不要转成 List<String>
+  List<Map<String, dynamic>> companyMatters = [];
   List<Map<String, dynamic>> companyDispatched = [];
   List<Map<String, dynamic>> personalTopItems = [];
   List<Map<String, dynamic>> personalLogs = [];
 
   // 选中用于展示的数据
-  List<String> selectedCompanyMatters = [];
+  List<Map<String, dynamic>> selectedCompanyMatters = [];
   List<Map<String, dynamic>> selectedCompanyDispatched = [];
   List<Map<String, dynamic>> selectedPersonalTopItems = [];
   List<Map<String, dynamic>> selectedPersonalLogs = [];
@@ -156,9 +157,10 @@ class _MindMapPageState extends State<MindMapPage> {
       if (resMatters.statusCode == 200) {
         final body = jsonDecode(resMatters.body);
         if (body['code'] == 0) {
-          final list = (body['data'] as List).cast<Map>();
-          companyMatters = list.map((e) => (e['title'] ?? '').toString()).toList();
+          final list = (body['data'] as List).cast<Map<String, dynamic>>();
+          companyMatters = list;
         }
+        print('✅ companyMatters = $companyMatters');
       }
 
       // 公司十大派发任务
@@ -202,7 +204,7 @@ class _MindMapPageState extends State<MindMapPage> {
       }
 
       // 默认全部展示（用户还未重新勾选时）
-      selectedCompanyMatters = List<String>.from(companyMatters);
+      selectedCompanyMatters = List<Map<String, dynamic>>.from(companyMatters);
       selectedCompanyDispatched = List<Map<String, dynamic>>.from(companyDispatched);
       selectedPersonalTopItems = List<Map<String, dynamic>>.from(personalTopItems);
       selectedPersonalLogs = List<Map<String, dynamic>>.from(personalLogs);
@@ -520,21 +522,18 @@ class _MindMapPageState extends State<MindMapPage> {
                                     child: Scrollbar(
                                       child: ListView.separated(
                                         padding: EdgeInsets.zero,
-                                        itemCount: selectedCompanyDispatched.isNotEmpty
-                                            ? selectedCompanyDispatched.length
-                                            : companyDispatched.length,
+                                        itemCount: selectedCompanyMatters.isNotEmpty
+                                            ? selectedCompanyMatters.length
+                                            : companyMatters.length,
                                         separatorBuilder: (_, __) => const SizedBox(height: 8),
                                         itemBuilder: (context, index) {
-                                          final list = selectedCompanyDispatched.isNotEmpty
-                                              ? selectedCompanyDispatched
-                                              : companyDispatched;
+                                          final list = selectedCompanyMatters.isNotEmpty
+                                              ? selectedCompanyMatters
+                                              : companyMatters;
                                           final item = list[index];
-
-                                          // 头像完整 URL
                                           final avatarFullUrl = (item['avatar_url'] ?? '').isNotEmpty
                                               ? '${UserProvider.baseUrl}${item['avatar_url']}'
                                               : null;
-
                                           return _taskRow(item['title'] ?? '', avatarFullUrl, index);
                                         },
                                       ),
